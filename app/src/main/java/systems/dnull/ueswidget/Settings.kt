@@ -3,12 +3,10 @@ package systems.dnull.ueswidget
 import android.content.Context
 import java.net.HttpURLConnection
 import java.net.URL
-import java.net.URLEncoder
-import java.util.TimeZone
 
 object Settings {
     const val DEFAULT_BASE_URL = "https://memory-ues.kudu-skate.ts.net"
-    const val DEFAULT_DASHBOARD_URL = "https://dashboard.libra.dnull.systems/today"
+    const val DEFAULT_DASHBOARD_URL = "https://dashboard.libra.dnull.systems/"
 
     private fun prefs(c: Context) = c.getSharedPreferences("ues_widget", Context.MODE_PRIVATE)
     fun baseUrl(c: Context) = prefs(c).getString("base_url", null) ?: DEFAULT_BASE_URL
@@ -23,8 +21,8 @@ object Settings {
 
 /** Blocking; call off the main thread. Throws on network/HTTP/parse errors. */
 fun fetchToday(baseUrl: String, apiKey: String): TodayResult {
-    val tz = URLEncoder.encode(TimeZone.getDefault().id, "UTF-8")
-    val conn = URL("${baseUrl.trimEnd('/')}/api/today?tz=$tz").openConnection() as HttpURLConnection
+    // No tz: Android reports legacy ids (Europe/Kiev) the server's tzdata lacks; it defaults to Europe/Kyiv.
+    val conn = URL("${baseUrl.trimEnd('/')}/api/today").openConnection() as HttpURLConnection
     try {
         conn.connectTimeout = 10_000
         conn.readTimeout = 10_000
