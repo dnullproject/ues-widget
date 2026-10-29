@@ -38,11 +38,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.async
 import kotlinx.coroutines.withContext
 
-// Dracula, same tokens as the dashboard (services/dashboard/src/lib/styles/theme.css).
-private val BG = ColorProvider(Color(0xF0282A36))
-private val FG = ColorProvider(Color(0xFFF8F8F2))
-private val MUTED = ColorProvider(Color(0xFF6272A4))
-private val PURPLE = ColorProvider(Color(0xFFBD93F9))
+// Status colours stay Dracula (dashboard theme.css); bg/text/muted/accent come from WidgetStyle.
 private val GREEN = ColorProvider(Color(0xFF50FA7B))
 private val CYAN = ColorProvider(Color(0xFF8BE9FD))
 private val RED = ColorProvider(Color(0xFFFF5555))
@@ -90,6 +86,7 @@ class UesWidget : GlanceAppWidget() {
         val key = Settings.apiKey(context)
         val url = Settings.baseUrl(context)
         val dashboard = Settings.dashboardUrl(context)
+        val st = WidgetStyle.load(context)
         val (result, vitals) = if (key.isBlank()) null to Vitals() else withContext(Dispatchers.IO) {
             val today = async {
                 try {
@@ -106,10 +103,10 @@ class UesWidget : GlanceAppWidget() {
             Intent(Intent.ACTION_VIEW, Uri.parse(dashboard)).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
         )
         provideContent {
-            Column(GlanceModifier.fillMaxSize().background(BG).cornerRadius(16.dp).padding(12.dp)) {
-                Header(result, vitals.bb ?: result?.bbLevel, open)
-                if (actionError != null) Text(actionError, style = TextStyle(color = RED, fontSize = 12.sp))
-                Status(result)
+            Column(GlanceModifier.fillMaxSize().background(st.bg).cornerRadius(st.corner.dp).padding(12.dp)) {
+                Header(st, result, vitals.bb ?: result?.bbLevel, open)
+                if (actionError != null) Text(actionError, style = TextStyle(color = RED, fontSize = st.sp(12)))
+                if (st.showStatus) Status(st, result)
                 val msg = when {
                     result == null -> "Налаштуй у застосунку"
                     result.error != null -> "Помилка: ${result.error}"
@@ -120,14 +117,14 @@ class UesWidget : GlanceAppWidget() {
                     Text(
                         msg,
                         GlanceModifier.defaultWeight().padding(vertical = 4.dp),
-                        style = TextStyle(color = if (result?.error != null) RED else MUTED, fontSize = 13.sp)
+                        style = TextStyle(color = if (result?.error != null) RED else st.muted, fontSize = st.sp(13))
                     )
                 } else {
                     LazyColumn(GlanceModifier.defaultWeight()) {
-                        items(result!!.items) { ItemRow(it) }
+                        items(result!!.items) { ItemRow(st, it) }
                     }
                 }
-                Footer(vitals, open)
+                if (st.showFooter) Footer(st, vitals, open)
             }
         }
     }
@@ -140,29 +137,29 @@ private fun bbColor(level: Int) = when {
 }
 
 @Composable
-private fun Header(result: TodayResult?, bb: Int?, open: Action) {
+private fun Header(st: WidgetStyle, result: TodayResult?, bb: Int?, open: Action) {
     val counts = if (result != null && result.error == null && result.items.isNotEmpty())
         "  ${result.done}/${result.items.size}" else ""
     Row(GlanceModifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
         Text(
             "Сьогодні$counts",
             GlanceModifier.defaultWeight().clickable(open),
-            style = TextStyle(color = PURPLE, fontWeight = FontWeight.Bold, fontSize = 16.sp)
+            style = TextStyle(color = st.accent, fontWeight = FontWeight.Bold, fontSize = st.sp(16))
         )
         if (bb != null) {
-            Text("⚡$bb", style = TextStyle(color = bbColor(bb), fontWeight = FontWeight.Bold, fontSize = 15.sp))
+            Text("⚡$bb", style = TextStyle(color = bbColor(bb), fontWeight = FontWeight.Bold, fontSize = st.sp(15)))
         }
         Text(
             "⟳",
             GlanceModifier.clickable(actionRunCallback<RefreshCallback>()).padding(start = 10.dp, end = 2.dp),
-            style = TextStyle(color = MUTED, fontSize = 17.sp)
+            style = TextStyle(color = st.muted, fontSize = st.sp(17))
         )
     }
 }
 
 /** One line under the header: the day is won, or what is next on the calendar. */
 @Composable
-private fun Status(result: TodayResult?) {
+private fun Status(st: WidgetStyle, result: TodayResult?) {
     val text = when {
         result == null || result.error != null -> return
         result.won -> "🏆 День виграно"
@@ -172,38 +169,38 @@ private fun Status(result: TodayResult?) {
     Text(
         text,
         GlanceModifier.padding(top = 2.dp, bottom = 4.dp),
-        style = TextStyle(color = if (result.won) YELLOW else CYAN, fontSize = 13.sp),
+        style = TextStyle(color = if (result.won) YELLOW else CYAN, fontSize = st.sp(13)),
         maxLines = 1
     )
 }
 
 @Composable
-private fun Footer(v: Vitals, open: Action) {
+private fun Footer(st: WidgetStyle, v: Vitals, open: Action) {
     val parts = buildList {
         if (v.sleepScore != null) {
             val dur = v.sleepHours?.let { " · ${hoursLabel(it)}" } ?: ""
-            add("😴 ${v.sleepScore}$dur" to if (v.sleepScore < 60) ORANGE else FG)
+            add("😴 ${v.sleepScore}$dur" to if (v.sleepScore < 60) ORANGE else st.fg)
         }
-        if (v.steps != null) add("👣 ${stepsLabel(v.steps)}" to FG)
-        if (v.habitsTotal != null) add("✅ ${v.habitsDone ?: 0}/${v.habitsTotal}" to FG)
+        if (v.steps != null) add("👣 ${stepsLabel(v.steps)}" to st.fg)
+        if (v.habitsTotal != null) add("✅ ${v.habitsDone ?: 0}/${v.habitsTotal}" to st.fg)
         if (v.inbox != null && v.inbox > 0) add("📥 ${v.inbox}" to PINK)
     }
     if (parts.isEmpty()) return
     Row(GlanceModifier.fillMaxWidth().padding(top = 6.dp).clickable(open)) {
         parts.forEachIndexed { i, (text, color) ->
-            if (i > 0) Text("   ", style = TextStyle(fontSize = 12.sp))
-            Text(text, style = TextStyle(color = color, fontSize = 12.sp), maxLines = 1)
+            if (i > 0) Text("   ", style = TextStyle(fontSize = st.sp(12)))
+            Text(text, style = TextStyle(color = color, fontSize = st.sp(12)), maxLines = 1)
         }
     }
 }
 
 @Composable
-private fun ItemRow(item: TodayItem) {
+private fun ItemRow(st: WidgetStyle, item: TodayItem) {
     val done = item.status == "done"
     val (mark, markColor) = when (item.status) {
         "done" -> "✓" to GREEN
         "running" -> "▶" to CYAN
-        else -> "○" to MUTED
+        else -> "○" to st.muted
     }
     Row(
         GlanceModifier.fillMaxWidth().padding(vertical = 5.dp).clickable(
@@ -211,18 +208,18 @@ private fun ItemRow(item: TodayItem) {
         ),
         verticalAlignment = Alignment.CenterVertically
     ) {
-        Text("$mark ", style = TextStyle(color = markColor, fontSize = 15.sp, fontWeight = FontWeight.Bold))
-        if (item.startTime != null) Text("${item.startTime} ", style = TextStyle(color = CYAN, fontSize = 13.sp))
+        Text("$mark ", style = TextStyle(color = markColor, fontSize = st.sp(15), fontWeight = FontWeight.Bold))
+        if (item.startTime != null) Text("${item.startTime} ", style = TextStyle(color = CYAN, fontSize = st.sp(13)))
         Text(
             item.title,
             GlanceModifier.defaultWeight(),
             style = TextStyle(
-                color = if (done) MUTED else FG,
-                fontSize = 14.sp,
+                color = if (done) st.muted else st.fg,
+                fontSize = st.sp(14),
                 textDecoration = if (done) TextDecoration.LineThrough else TextDecoration.None
             ),
             maxLines = 2
         )
-        if (item.sp > 0) Text(" ${item.sp}sp", style = TextStyle(color = MUTED, fontSize = 11.sp))
+        if (st.showSp && item.sp > 0) Text(" ${item.sp}sp", style = TextStyle(color = st.muted, fontSize = st.sp(11)))
     }
 }
