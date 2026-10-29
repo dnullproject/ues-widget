@@ -47,6 +47,8 @@ class SettingsActivity : Activity() {
         val showStatus = check("Подія / «день виграно»", s.showStatus)
         val showFooter = check("Нижній рядок: сон, кроки, звички, inbox", s.showFooter)
         val showSp = check("SP біля задач", s.showSp)
+        val showSystem = check("Система: алерти, uptime, помилки, Win", s.showSystem)
+        val showAgents = check("Агенти: квоти Claude/Gemini, воркери", s.showAgents)
 
         col.addView(Button(this).apply {
             text = "Зберегти"
@@ -61,6 +63,7 @@ class SettingsActivity : Activity() {
                     bgHex = hexes[0]!!, bgOpacity = opacity.value(), fgHex = hexes[1]!!, mutedHex = hexes[2]!!,
                     accentHex = hexes[3]!!, textScale = scale.value(), corner = corner.value(),
                     showStatus = showStatus.isChecked, showFooter = showFooter.isChecked, showSp = showSp.isChecked,
+                    showSystem = showSystem.isChecked, showAgents = showAgents.isChecked,
                 ).save(context)
                 refreshWidgets()
                 Toast.makeText(context, "Збережено", Toast.LENGTH_SHORT).show()

@@ -40,6 +40,10 @@ private fun call(baseUrl: String, apiKey: String, method: String, path: String):
 fun fetchToday(baseUrl: String, apiKey: String): TodayResult =
     parseToday(call(baseUrl, apiKey, "GET", "/api/today"))
 
+/** Dashboard /api/widget (same API key); null when the dashboard is unreachable. */
+fun fetchSystem(dashboardUrl: String, apiKey: String): SystemSnapshot? =
+    try { parseSystem(call(dashboardUrl, apiKey, "GET", "/api/widget")) } catch (e: Exception) { null }
+
 /** Best-effort extras for the widget; any endpoint that fails is skipped. */
 fun fetchVitals(baseUrl: String, apiKey: String): Vitals {
     var v = Vitals()
