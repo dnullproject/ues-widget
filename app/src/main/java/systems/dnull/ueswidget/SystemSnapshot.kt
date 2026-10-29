@@ -60,7 +60,7 @@ fun parseSystem(json: String): SystemSnapshot {
         game = gaming?.strOrNull("game"),
         wellLevel = well?.takeUnless { it.isNull("level") }?.optDouble("level")?.takeIf { !it.isNaN() },
         wellUnit = well?.strOrNull("unit") ?: "m",
-        wellUpdatedAt = well?.strOrNull("updated_at")?.let { runCatching { java.time.Instant.parse(it).toEpochMilli() }.getOrNull() },
+        wellUpdatedAt = well?.strOrNull("updated_at")?.let { runCatching { java.time.OffsetDateTime.parse(it).toInstant().toEpochMilli() }.getOrNull() },
         homeAttention = if (home == null) emptyList() else (0 until home.length()).mapNotNull { home.optString(it).ifBlank { null } },
     )
 }

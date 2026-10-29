@@ -19,7 +19,7 @@ class SystemSnapshotTest {
             "agents":{"running":1,"workers":[{"engine":"claude","task":"widget-api","minutes":12}],"ledgers":[]},
             "gaming":{"state":"running","game":"Hades"},
             "home":{"attention":["Front door open"]},
-            "well":{"level":1.234,"unit":"m","updated_at":"2026-10-29T20:00:00.000Z"}}"""
+            "well":{"level":1.234,"unit":"m","updated_at":"2026-10-29T20:00:00.840973+00:00"}}"""
         )
         assertEquals(1, s.triagePage)
         assertEquals("memory: readiness", s.triageTop)
@@ -35,7 +35,7 @@ class SystemSnapshotTest {
         assertEquals(listOf(24, 84), g[1].second.map { it.usedPct })
         assertTrue(s.hasSystem && s.hasAgents)
         assertEquals(1.234, s.wellLevel!!, 1e-9)
-        assertEquals(java.time.Instant.parse("2026-10-29T20:00:00Z").toEpochMilli(), s.wellUpdatedAt)
+        assertEquals(java.time.Instant.parse("2026-10-29T20:00:00.840Z").toEpochMilli(), s.wellUpdatedAt)
     }
 
     @Test fun ages() {
