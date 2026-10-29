@@ -16,7 +16,8 @@ class TodayResultTest {
         assertNull(r.error)
         assertEquals(3, r.items.size)
         assertEquals(1, r.done)
-        assertEquals(listOf("✓ 09:30 A", "▶ B", "• C"), r.items.map { it.line() })
+        assertEquals(listOf("09:30", null, null), r.items.map { it.startTime })
+        assertEquals(listOf("1", "2", "3"), r.items.map { it.pageId })
     }
 
     @Test fun emptyItems() {

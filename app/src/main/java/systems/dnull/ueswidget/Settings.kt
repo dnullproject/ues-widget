@@ -3,6 +3,7 @@ package systems.dnull.ueswidget
 import android.content.Context
 import java.net.HttpURLConnection
 import java.net.URL
+import java.net.URLEncoder
 
 object Settings {
     const val DEFAULT_BASE_URL = "https://memory-ues.kudu-skate.ts.net"
@@ -19,18 +20,28 @@ object Settings {
     }
 }
 
-/** Blocking; call off the main thread. Throws on network/HTTP/parse errors. */
-fun fetchToday(baseUrl: String, apiKey: String): TodayResult {
-    // No tz: Android reports legacy ids (Europe/Kiev) the server's tzdata lacks; it defaults to Europe/Kyiv.
-    val conn = URL("${baseUrl.trimEnd('/')}/api/today").openConnection() as HttpURLConnection
+/** Blocking; call off the main thread. Throws on network/HTTP errors. Returns the body. */
+private fun call(baseUrl: String, apiKey: String, method: String, path: String): String {
+    val conn = URL("${baseUrl.trimEnd('/')}$path").openConnection() as HttpURLConnection
     try {
+        conn.requestMethod = method
         conn.connectTimeout = 10_000
         conn.readTimeout = 10_000
         conn.setRequestProperty("X-API-Key", apiKey)
         val code = conn.responseCode
         if (code != 200) error("HTTP $code")
-        return parseToday(conn.inputStream.bufferedReader().use { it.readText() })
+        return conn.inputStream.bufferedReader().use { it.readText() }
     } finally {
         conn.disconnect()
     }
+}
+
+// No tz: Android reports legacy ids (Europe/Kiev) the server's tzdata lacks; it defaults to Europe/Kyiv.
+fun fetchToday(baseUrl: String, apiKey: String): TodayResult =
+    parseToday(call(baseUrl, apiKey, "GET", "/api/today"))
+
+/** Marks a plan item done, or reopens it if it is already done. */
+fun toggleDone(baseUrl: String, apiKey: String, pageId: String, done: Boolean) {
+    val id = URLEncoder.encode(pageId, "UTF-8")
+    call(baseUrl, apiKey, "POST", "/api/today/items/$id/${if (done) "reopen" else "done"}")
 }
