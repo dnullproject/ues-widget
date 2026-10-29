@@ -1,9 +1,6 @@
 package systems.dnull.ueswidget
 
 import android.app.Activity
-import android.appwidget.AppWidgetManager
-import android.content.ComponentName
-import android.content.Intent
 import android.graphics.drawable.GradientDrawable
 import android.os.Bundle
 import android.text.Editable
@@ -18,6 +15,9 @@ import android.widget.ScrollView
 import android.widget.SeekBar
 import android.widget.TextView
 import android.widget.Toast
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
 
 class SettingsActivity : Activity() {
     private lateinit var col: LinearLayout
@@ -81,12 +81,10 @@ class SettingsActivity : Activity() {
         setContentView(ScrollView(this).apply { fitsSystemWindows = true; addView(col) })
     }
 
+    // A bare APPWIDGET_UPDATE broadcast only recomposes a live Glance session with its old data.
     private fun refreshWidgets() {
-        val ids = AppWidgetManager.getInstance(this).getAppWidgetIds(ComponentName(this, UesWidgetReceiver::class.java))
-        sendBroadcast(
-            Intent(AppWidgetManager.ACTION_APPWIDGET_UPDATE, null, this, UesWidgetReceiver::class.java)
-                .putExtra(AppWidgetManager.EXTRA_APPWIDGET_IDS, ids)
-        )
+        val app = applicationContext
+        CoroutineScope(Dispatchers.Default).launch { refreshAll(app) }
     }
 
     private fun section(title: String) {

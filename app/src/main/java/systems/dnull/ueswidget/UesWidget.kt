@@ -36,6 +36,17 @@ import androidx.glance.action.Action
 import androidx.glance.layout.Alignment
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.async
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.launch
+import android.appwidget.AppWidgetManager
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.produceState
+import androidx.compose.runtime.remember
+import androidx.datastore.preferences.core.longPreferencesKey
+import androidx.glance.appwidget.GlanceAppWidgetManager
+import androidx.glance.appwidget.state.updateAppWidgetState
+import androidx.glance.currentState
+import androidx.glance.state.PreferencesGlanceStateDefinition
 import kotlinx.coroutines.withContext
 
 // Status colours stay Dracula (dashboard theme.css); bg/text/muted/accent come from WidgetStyle.
@@ -51,11 +62,32 @@ private val IS_DONE = ActionParameters.Key<Boolean>("is_done")
 
 class UesWidgetReceiver : GlanceAppWidgetReceiver() {
     override val glanceAppWidget = UesWidget()
+
+    // The periodic APPWIDGET_UPDATE only recomposes a live Glance session; bump the tick so data reloads too.
+    override fun onUpdate(context: Context, appWidgetManager: AppWidgetManager, appWidgetIds: IntArray) {
+        super.onUpdate(context, appWidgetManager, appWidgetIds)
+        val pending = goAsync()
+        CoroutineScope(Dispatchers.Default).launch {
+            try { refreshAll(context) } finally { pending.finish() }
+        }
+    }
+}
+
+private val TICK = longPreferencesKey("tick")
+
+/** Reload one widget: a Glance update alone would reuse the data the running session already holds. */
+suspend fun refresh(context: Context, id: GlanceId) {
+    updateAppWidgetState(context, id) { it[TICK] = System.nanoTime() }
+    UesWidget().update(context, id)
+}
+
+suspend fun refreshAll(context: Context) {
+    GlanceAppWidgetManager(context).getGlanceIds(UesWidget::class.java).forEach { refresh(context, it) }
 }
 
 class RefreshCallback : ActionCallback {
     override suspend fun onAction(context: Context, glanceId: GlanceId, parameters: ActionParameters) {
-        UesWidget().update(context, glanceId)
+        refresh(context, glanceId)
     }
 }
 
@@ -72,8 +104,37 @@ class ToggleDoneCallback : ActionCallback {
             }
         }
         if (err != null) UesWidget.lastError = "Не відмітилось: $err".take(48)
-        UesWidget().update(context, glanceId)
+        refresh(context, glanceId)
     }
+}
+
+/** Everything one render needs, loaded together off the main thread. */
+private data class Snapshot(
+    val st: WidgetStyle,
+    val dashboard: String,
+    val result: TodayResult?,
+    val vitals: Vitals,
+    val system: SystemSnapshot?,
+    val actionError: String?,
+)
+
+private suspend fun loadSnapshot(context: Context): Snapshot = withContext(Dispatchers.IO) {
+    val key = Settings.apiKey(context)
+    val url = Settings.baseUrl(context)
+    val dashboard = Settings.dashboardUrl(context)
+    val st = WidgetStyle.load(context)
+    val actionError = UesWidget.lastError.also { UesWidget.lastError = null }
+    if (key.isBlank()) return@withContext Snapshot(st, dashboard, null, Vitals(), null, actionError)
+    val today = async {
+        try {
+            fetchToday(url, key)
+        } catch (e: Exception) {
+            TodayResult(emptyList(), (e.message ?: e.javaClass.simpleName).take(40))
+        }
+    }
+    val extras = async { fetchVitals(url, key) }
+    val sys = async { if (st.showSystem || st.showAgents) fetchSystem(dashboard, key) else null }
+    Snapshot(st, dashboard, today.await(), extras.await(), sys.await(), actionError)
 }
 
 class UesWidget : GlanceAppWidget() {
@@ -82,54 +143,53 @@ class UesWidget : GlanceAppWidget() {
         @Volatile var lastError: String? = null
     }
 
+    override val stateDefinition = PreferencesGlanceStateDefinition
+
     override suspend fun provideGlance(context: Context, id: GlanceId) {
-        val key = Settings.apiKey(context)
-        val url = Settings.baseUrl(context)
-        val dashboard = Settings.dashboardUrl(context)
-        val st = WidgetStyle.load(context)
-        val (result, vitals, system) = if (key.isBlank()) Triple(null, Vitals(), null) else withContext(Dispatchers.IO) {
-            val today = async {
-                try {
-                    fetchToday(url, key)
-                } catch (e: Exception) {
-                    TodayResult(emptyList(), (e.message ?: e.javaClass.simpleName).take(40))
-                }
-            }
-            val extras = async { fetchVitals(url, key) }
-            val sys = async { if (st.showSystem || st.showAgents) fetchSystem(dashboard, key) else null }
-            Triple(today.await(), extras.await(), sys.await())
-        }
-        val actionError = lastError.also { lastError = null }
-        val open = actionStartActivity(
-            Intent(Intent.ACTION_VIEW, Uri.parse(dashboard)).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-        )
+        val first = loadSnapshot(context)
         provideContent {
-            Column(GlanceModifier.fillMaxSize().background(st.bg).cornerRadius(st.corner.dp).padding(12.dp)) {
-                Header(st, result, vitals.bb ?: result?.bbLevel, open)
-                if (actionError != null) Text(actionError, style = TextStyle(color = RED, fontSize = st.sp(12)))
-                if (st.showStatus) Status(st, result)
-                val msg = when {
-                    result == null -> "Налаштуй у застосунку"
-                    result.error != null -> "Помилка: ${result.error}"
-                    result.items.isEmpty() -> "Немає задач"
-                    else -> null
-                }
-                if (msg != null) {
-                    Text(
-                        msg,
-                        GlanceModifier.defaultWeight().padding(vertical = 4.dp),
-                        style = TextStyle(color = if (result?.error != null) RED else st.muted, fontSize = st.sp(13))
-                    )
-                } else {
-                    LazyColumn(GlanceModifier.defaultWeight()) {
-                        items(result!!.items) { ItemRow(st, it) }
-                    }
-                }
-                if (system != null && st.showSystem && system.hasSystem) SystemRow(st, system)
-                if (system != null && st.showAgents && system.hasAgents) AgentsRow(st, system)
-                if (st.showFooter) Footer(st, vitals, open)
+            val tick = currentState(TICK) ?: 0L
+            // Reloads whenever refresh() bumps the tick; keeps showing the previous snapshot meanwhile.
+            val startTick = remember { tick }
+            val snap by produceState(first, tick) { if (tick != startTick) value = loadSnapshot(context) }
+            Content(snap)
+        }
+    }
+}
+
+@Composable
+private fun Content(snap: Snapshot) {
+    val st = snap.st
+    val result = snap.result
+    val vitals = snap.vitals
+    val system = snap.system
+    val open = actionStartActivity(
+        Intent(Intent.ACTION_VIEW, Uri.parse(snap.dashboard)).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+    )
+    Column(GlanceModifier.fillMaxSize().background(st.bg).cornerRadius(st.corner.dp).padding(12.dp)) {
+        Header(st, result, vitals.bb ?: result?.bbLevel, open)
+        if (snap.actionError != null) Text(snap.actionError, style = TextStyle(color = RED, fontSize = st.sp(12)))
+        if (st.showStatus) Status(st, result)
+        val msg = when {
+            result == null -> "Налаштуй у застосунку"
+            result.error != null -> "Помилка: ${result.error}"
+            result.items.isEmpty() -> "Немає задач"
+            else -> null
+        }
+        if (msg != null) {
+            Text(
+                msg,
+                GlanceModifier.defaultWeight().padding(vertical = 4.dp),
+                style = TextStyle(color = if (result?.error != null) RED else st.muted, fontSize = st.sp(13))
+            )
+        } else {
+            LazyColumn(GlanceModifier.defaultWeight()) {
+                items(result!!.items) { ItemRow(st, it) }
             }
         }
+        if (system != null && st.showSystem && system.hasSystem) SystemRow(st, system)
+        if (system != null && st.showAgents && system.hasAgents) AgentsRow(st, system)
+        if (st.showFooter) Footer(st, vitals, open)
     }
 }
 

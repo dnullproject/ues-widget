@@ -37,6 +37,7 @@ android {
 
 dependencies {
     implementation("androidx.glance:glance-appwidget:1.1.1")
+    implementation("androidx.datastore:datastore-preferences:1.1.1")
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.9.0")
     // android.jar's org.json is stubbed in JVM unit tests
     testImplementation("org.json:json:20240303")
