@@ -10,6 +10,7 @@ import android.widget.Button
 import android.widget.EditText
 import android.widget.LinearLayout
 import android.widget.ScrollView
+import android.widget.TextView
 import android.widget.Toast
 
 class SettingsActivity : Activity() {
@@ -17,9 +18,14 @@ class SettingsActivity : Activity() {
         super.onCreate(savedInstanceState)
         val pad = (16 * resources.displayMetrics.density).toInt()
         val col = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; setPadding(pad, pad, pad, pad) }
-        fun field(hint: String, value: String, type: Int) = EditText(this).apply {
-            this.hint = hint; setText(value); inputType = type; setSingleLine()
-        }.also { col.addView(it) }
+        col.addView(TextView(this).apply { text = "UES Widget"; textSize = 22f; setPadding(0, 0, 0, pad) })
+        // Hints vanish once a field is filled, so each field gets a visible label.
+        fun field(hint: String, value: String, type: Int): EditText {
+            col.addView(TextView(this).apply { text = hint; setPadding(0, pad / 2, 0, 0) })
+            return EditText(this).apply {
+                this.hint = hint; setText(value); inputType = type; setSingleLine()
+            }.also { col.addView(it) }
+        }
 
         val uri = InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_VARIATION_URI
         val base = field("Memory API base URL", Settings.baseUrl(this), uri)
@@ -38,6 +44,7 @@ class SettingsActivity : Activity() {
                 Toast.makeText(context, "Saved", Toast.LENGTH_SHORT).show()
             }
         })
-        setContentView(ScrollView(this).apply { addView(col) })
+        // targetSdk 35 forces edge-to-edge; pad for system bars so nothing hides under them.
+        setContentView(ScrollView(this).apply { fitsSystemWindows = true; addView(col) })
     }
 }
