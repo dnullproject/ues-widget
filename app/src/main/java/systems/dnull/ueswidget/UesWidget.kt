@@ -233,10 +233,10 @@ private fun stateColor(state: String) = when (state) {
     else -> GREEN
 }
 
-/** Glanceable health: alerts, uptime, unresolved errors, the Windows gaming VM, home attention. */
+/** Glanceable health in two short rows: alerts first (well, triage, home), then uptime, errors and the Win VM. */
 @Composable
 private fun SystemRow(st: WidgetStyle, s: SystemSnapshot) {
-    val parts = buildList {
+    val alerts = buildList {
         if (s.wellUpdatedAt != null) {
             val age = System.currentTimeMillis() - s.wellUpdatedAt
             val level = s.wellLevel?.let { "%.2f%s".format(java.util.Locale.ROOT, it, if (s.wellUnit == "m") "м" else s.wellUnit) } ?: "?"
@@ -251,6 +251,9 @@ private fun SystemRow(st: WidgetStyle, s: SystemSnapshot) {
             attention > 0 -> add("🟠 $attention${s.triageTop?.let { " $it" } ?: ""}" to ORANGE)
             s.triagePage != null -> add("🟢 ок" to GREEN)
         }
+        s.homeAttention.firstOrNull()?.let { add("🏠 $it" to ORANGE) }
+    }
+    val info = buildList {
         if (s.uptimeUp != null && s.uptimeTotal != null) {
             add("↑${s.uptimeUp}/${s.uptimeTotal}" to if (s.uptimeUp < s.uptimeTotal) ORANGE else st.muted)
         }
@@ -261,10 +264,15 @@ private fun SystemRow(st: WidgetStyle, s: SystemSnapshot) {
             "hibernated" -> add("💤 Win" to st.muted)
             "off" -> add("⏻ Win" to st.muted)
         }
-        s.homeAttention.firstOrNull()?.let { add("🏠 $it" to ORANGE) }
     }
+    Chips(st, alerts, top = 6)
+    Chips(st, info, top = 2)
+}
+
+@Composable
+private fun Chips(st: WidgetStyle, parts: List<Pair<String, ColorProvider>>, top: Int) {
     if (parts.isEmpty()) return
-    Row(GlanceModifier.fillMaxWidth().padding(top = 6.dp)) {
+    Row(GlanceModifier.fillMaxWidth().padding(top = top.dp)) {
         parts.forEachIndexed { i, (text, color) ->
             if (i > 0) Text("  ", style = TextStyle(fontSize = st.sp(12)))
             Text(text, style = TextStyle(color = color, fontSize = st.sp(12)), maxLines = 1)
