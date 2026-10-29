@@ -40,6 +40,19 @@ private fun call(baseUrl: String, apiKey: String, method: String, path: String):
 fun fetchToday(baseUrl: String, apiKey: String): TodayResult =
     parseToday(call(baseUrl, apiKey, "GET", "/api/today"))
 
+/** Best-effort extras for the widget; any endpoint that fails is skipped. */
+fun fetchVitals(baseUrl: String, apiKey: String): Vitals {
+    var v = Vitals()
+    fun step(path: String, apply: Vitals.(String) -> Vitals) {
+        v = try { v.apply(call(baseUrl, apiKey, "GET", path)) } catch (e: Exception) { v }
+    }
+    step("/api/body-battery/current", Vitals::withBodyBattery)
+    step("/api/stats/daily-summary", Vitals::withDailySummary)
+    step("/api/health/current", Vitals::withHealth)
+    step("/api/inbox", Vitals::withInbox)
+    return v
+}
+
 /** Marks a plan item done, or reopens it if it is already done. */
 fun toggleDone(baseUrl: String, apiKey: String, pageId: String, done: Boolean) {
     val id = URLEncoder.encode(pageId, "UTF-8")
