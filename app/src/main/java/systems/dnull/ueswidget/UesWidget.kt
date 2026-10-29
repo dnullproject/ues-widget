@@ -237,6 +237,12 @@ private fun stateColor(state: String) = when (state) {
 @Composable
 private fun SystemRow(st: WidgetStyle, s: SystemSnapshot) {
     val parts = buildList {
+        if (s.wellUpdatedAt != null) {
+            val age = System.currentTimeMillis() - s.wellUpdatedAt
+            val level = s.wellLevel?.let { "%.2f%s".format(java.util.Locale.ROOT, it, if (s.wellUnit == "m") "м" else s.wellUnit) } ?: "?"
+            if (age > WELL_STALE_MS) add("💧 $level ⚠ ${ageLabel(age)}" to RED)
+            else add("💧 $level · ${ageLabel(age)}" to CYAN)
+        }
         val page = s.triagePage ?: 0
         val attention = s.triageAttention ?: 0
         when {

@@ -17,11 +17,15 @@ data class SystemSnapshot(
     val gamingState: String? = null,
     val game: String? = null,
     val homeAttention: List<String> = emptyList(),
+    val wellLevel: Double? = null,
+    val wellUnit: String = "m",
+    /** Sensor's last report, epoch millis; null when there is no well data. */
+    val wellUpdatedAt: Long? = null,
 ) {
     data class Quota(val pool: String, val window: String, val usedPct: Int, val state: String)
     data class Worker(val engine: String, val task: String, val minutes: Int)
 
-    val hasSystem get() = triagePage != null || uptimeTotal != null || errors != null || gamingState != null
+    val hasSystem get() = wellUpdatedAt != null || triagePage != null || uptimeTotal != null || errors != null || gamingState != null
     val hasAgents get() = quota.isNotEmpty() || workers.isNotEmpty()
 }
 
@@ -36,6 +40,7 @@ fun parseSystem(json: String): SystemSnapshot {
     val uptime = o.optJSONObject("uptime")
     val gaming = o.optJSONObject("gaming")
     val home = o.optJSONObject("home")?.optJSONArray("attention")
+    val well = o.optJSONObject("well")
     return SystemSnapshot(
         triagePage = triage?.intOrNull("page"),
         triageAttention = triage?.intOrNull("attention"),
@@ -53,6 +58,9 @@ fun parseSystem(json: String): SystemSnapshot {
         },
         gamingState = gaming?.strOrNull("state"),
         game = gaming?.strOrNull("game"),
+        wellLevel = well?.takeUnless { it.isNull("level") }?.optDouble("level")?.takeIf { !it.isNaN() },
+        wellUnit = well?.strOrNull("unit") ?: "m",
+        wellUpdatedAt = well?.strOrNull("updated_at")?.let { runCatching { java.time.Instant.parse(it).toEpochMilli() }.getOrNull() },
         homeAttention = if (home == null) emptyList() else (0 until home.length()).mapNotNull { home.optString(it).ifBlank { null } },
     )
 }
@@ -62,3 +70,16 @@ fun quotaGroups(q: List<SystemSnapshot.Quota>): List<Pair<String, List<SystemSna
     q.groupBy { it.pool }.map { (pool, list) ->
         pool.take(1).uppercase() to list.sortedBy { if (it.window == "5h") 0 else 1 }
     }.sortedBy { it.first }
+
+/** Well data older than this is shown as an alert: the sensor went quiet. */
+const val WELL_STALE_MS = 2 * 60 * 60 * 1000L
+
+/** 42 min -> "42хв", 3 h -> "3г", 2 days -> "2д". */
+fun ageLabel(ms: Long): String {
+    val min = (ms / 60_000).coerceAtLeast(0)
+    return when {
+        min < 60 -> "${min}хв"
+        min < 48 * 60 -> "${min / 60}г"
+        else -> "${min / (24 * 60)}д"
+    }
+}

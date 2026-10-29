@@ -18,7 +18,8 @@ class SystemSnapshotTest {
                      {"pool":"gemini","window":"5h","used_pct":24,"state":"ok"}],
             "agents":{"running":1,"workers":[{"engine":"claude","task":"widget-api","minutes":12}],"ledgers":[]},
             "gaming":{"state":"running","game":"Hades"},
-            "home":{"attention":["Front door open"]}}"""
+            "home":{"attention":["Front door open"]},
+            "well":{"level":1.234,"unit":"m","updated_at":"2026-10-29T20:00:00.000Z"}}"""
         )
         assertEquals(1, s.triagePage)
         assertEquals("memory: readiness", s.triageTop)
@@ -33,12 +34,22 @@ class SystemSnapshotTest {
         assertEquals(listOf(33, 7), g[0].second.map { it.usedPct })
         assertEquals(listOf(24, 84), g[1].second.map { it.usedPct })
         assertTrue(s.hasSystem && s.hasAgents)
+        assertEquals(1.234, s.wellLevel!!, 1e-9)
+        assertEquals(java.time.Instant.parse("2026-10-29T20:00:00Z").toEpochMilli(), s.wellUpdatedAt)
+    }
+
+    @Test fun ages() {
+        assertEquals("0хв", ageLabel(-5))
+        assertEquals("42хв", ageLabel(42 * 60_000L))
+        assertEquals("3г", ageLabel(3 * 3_600_000L))
+        assertEquals("2д", ageLabel(50 * 3_600_000L))
     }
 
     @Test fun allSourcesDown() {
-        val s = parseSystem("""{"generated_at":"x","triage":null,"uptime":null,"errors":null,"quota":null,"agents":null,"gaming":null,"home":null}""")
+        val s = parseSystem("""{"generated_at":"x","triage":null,"uptime":null,"errors":null,"quota":null,"agents":null,"gaming":null,"home":null,"well":null}""")
         assertNull(s.triagePage)
         assertNull(s.gamingState)
+        assertNull(s.wellUpdatedAt)
         assertTrue(s.quota.isEmpty())
         assertFalse(s.hasSystem)
         assertFalse(s.hasAgents)
