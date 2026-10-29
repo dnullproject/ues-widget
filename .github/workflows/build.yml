@@ -1,8 +1,8 @@
 name: build
 
+# PRs are checked before merge, so pushes to branches/main don't rebuild; tags build the release.
 on:
   push:
-    branches: ["**"]
     tags: ["v*"]
   pull_request:
 
