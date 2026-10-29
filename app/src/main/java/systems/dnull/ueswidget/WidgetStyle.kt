@@ -18,6 +18,8 @@ data class WidgetStyle(
     val showStatus: Boolean = true,
     val showFooter: Boolean = true,
     val showSp: Boolean = true,
+    val showSystem: Boolean = true,
+    val showAgents: Boolean = true,
 ) {
     val bg get() = ColorProvider(Color(withAlpha(parseHex(bgHex), bgOpacity)))
     val fg get() = ColorProvider(Color(parseHex(fgHex)))
@@ -31,6 +33,7 @@ data class WidgetStyle(
             .putString("muted", mutedHex).putString("accent", accentHex).putInt("text_scale", textScale)
             .putInt("corner", corner).putBoolean("show_status", showStatus)
             .putBoolean("show_footer", showFooter).putBoolean("show_sp", showSp)
+            .putBoolean("show_system", showSystem).putBoolean("show_agents", showAgents)
             .apply()
     }
 
@@ -51,6 +54,8 @@ data class WidgetStyle(
                 showStatus = p.getBoolean("show_status", d.showStatus),
                 showFooter = p.getBoolean("show_footer", d.showFooter),
                 showSp = p.getBoolean("show_sp", d.showSp),
+                showSystem = p.getBoolean("show_system", d.showSystem),
+                showAgents = p.getBoolean("show_agents", d.showAgents),
             )
         }
     }

@@ -87,7 +87,7 @@ class UesWidget : GlanceAppWidget() {
         val url = Settings.baseUrl(context)
         val dashboard = Settings.dashboardUrl(context)
         val st = WidgetStyle.load(context)
-        val (result, vitals) = if (key.isBlank()) null to Vitals() else withContext(Dispatchers.IO) {
+        val (result, vitals, system) = if (key.isBlank()) Triple(null, Vitals(), null) else withContext(Dispatchers.IO) {
             val today = async {
                 try {
                     fetchToday(url, key)
@@ -96,7 +96,8 @@ class UesWidget : GlanceAppWidget() {
                 }
             }
             val extras = async { fetchVitals(url, key) }
-            today.await() to extras.await()
+            val sys = async { if (st.showSystem || st.showAgents) fetchSystem(dashboard, key) else null }
+            Triple(today.await(), extras.await(), sys.await())
         }
         val actionError = lastError.also { lastError = null }
         val open = actionStartActivity(
@@ -124,6 +125,8 @@ class UesWidget : GlanceAppWidget() {
                         items(result!!.items) { ItemRow(st, it) }
                     }
                 }
+                if (system != null && st.showSystem && system.hasSystem) SystemRow(st, system)
+                if (system != null && st.showAgents && system.hasAgents) AgentsRow(st, system)
                 if (st.showFooter) Footer(st, vitals, open)
             }
         }
@@ -221,5 +224,83 @@ private fun ItemRow(st: WidgetStyle, item: TodayItem) {
             maxLines = 2
         )
         if (st.showSp && item.sp > 0) Text(" ${item.sp}sp", style = TextStyle(color = st.muted, fontSize = st.sp(11)))
+    }
+}
+
+private fun stateColor(state: String) = when (state) {
+    "crit" -> RED
+    "warn" -> ORANGE
+    else -> GREEN
+}
+
+/** Glanceable health in two short rows: alerts first (well, triage, home), then uptime, errors and the Win VM. */
+@Composable
+private fun SystemRow(st: WidgetStyle, s: SystemSnapshot) {
+    val alerts = buildList {
+        if (s.wellUpdatedAt != null) {
+            val age = System.currentTimeMillis() - s.wellUpdatedAt
+            val level = s.wellLevel?.let { "%.2f%s".format(java.util.Locale.ROOT, it, if (s.wellUnit == "m") "м" else s.wellUnit) } ?: "?"
+            if (age > WELL_STALE_MS) add("💧 $level ⚠ ${ageLabel(age)}" to RED)
+            else add("💧 $level · ${ageLabel(age)}" to CYAN)
+        }
+        val page = s.triagePage ?: 0
+        val attention = s.triageAttention ?: 0
+        when {
+            page > 0 -> add("🔴 $page${s.triageTop?.let { " $it" } ?: ""}" to RED)
+            !s.pipelineHealthy -> add("⚠ алерти не працюють" to ORANGE)
+            attention > 0 -> add("🟠 $attention${s.triageTop?.let { " $it" } ?: ""}" to ORANGE)
+            s.triagePage != null -> add("🟢 ок" to GREEN)
+        }
+        s.homeAttention.firstOrNull()?.let { add("🏠 $it" to ORANGE) }
+    }
+    val info = buildList {
+        if (s.uptimeUp != null && s.uptimeTotal != null) {
+            add("↑${s.uptimeUp}/${s.uptimeTotal}" to if (s.uptimeUp < s.uptimeTotal) ORANGE else st.muted)
+        }
+        if ((s.errors ?: 0) > 0) add("🐞${s.errors}" to PINK)
+        when (s.gamingState) {
+            "running" -> add("🎮 Win${s.game?.let { " · $it" } ?: ""}" to GREEN)
+            "paused" -> add("⏸ Win" to YELLOW)
+            "hibernated" -> add("💤 Win" to st.muted)
+            "off" -> add("⏻ Win" to st.muted)
+        }
+    }
+    Chips(st, alerts, top = 6)
+    Chips(st, info, top = 2)
+}
+
+@Composable
+private fun Chips(st: WidgetStyle, parts: List<Pair<String, ColorProvider>>, top: Int) {
+    if (parts.isEmpty()) return
+    Row(GlanceModifier.fillMaxWidth().padding(top = top.dp)) {
+        parts.forEachIndexed { i, (text, color) ->
+            if (i > 0) Text("  ", style = TextStyle(fontSize = st.sp(12)))
+            Text(text, style = TextStyle(color = color, fontSize = st.sp(12)), maxLines = 1)
+        }
+    }
+}
+
+/** "C 33·7  G 24·84  ⚙ widget-api 12m": quota used % per window, coloured by state, plus running workers. */
+@Composable
+private fun AgentsRow(st: WidgetStyle, s: SystemSnapshot) {
+    Row(GlanceModifier.fillMaxWidth().padding(top = 3.dp), verticalAlignment = Alignment.CenterVertically) {
+        quotaGroups(s.quota).forEach { (label, windows) ->
+            Text("$label ", style = TextStyle(color = st.muted, fontSize = st.sp(12), fontWeight = FontWeight.Bold))
+            windows.forEachIndexed { i, q ->
+                if (i > 0) Text("·", style = TextStyle(color = st.muted, fontSize = st.sp(12)))
+                Text("${q.usedPct}", style = TextStyle(color = stateColor(q.state), fontSize = st.sp(12)))
+            }
+            Text("  ", style = TextStyle(fontSize = st.sp(12)))
+        }
+        val w = s.workers.firstOrNull()
+        if (w != null) {
+            val more = if (s.workers.size > 1) " +${s.workers.size - 1}" else ""
+            Text(
+                "⚙ ${w.task} ${w.minutes}m$more",
+                GlanceModifier.defaultWeight(),
+                style = TextStyle(color = CYAN, fontSize = st.sp(12)),
+                maxLines = 1
+            )
+        }
     }
 }
