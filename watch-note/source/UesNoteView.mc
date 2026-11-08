@@ -76,11 +76,6 @@ class NoteSession {
         return _dur;
     }
 
-    function pending() as Number {
-        var n = sender.ids().size();
-        return (state == ST_REC || state == ST_STOPPING) ? n - 1 : n;
-    }
-
     // START / BACK
     function stop() as Void {
         if (state == ST_REC) {
@@ -126,7 +121,7 @@ class NoteSession {
             :fromRepresentation => StringUtil.REPRESENTATION_BYTE_ARRAY,
             :toRepresentation => StringUtil.REPRESENTATION_STRING_BASE64
         }) as String;
-        if (!sender.addChunk(_id, b64)) { // Storage full
+        if (!sender.addChunk(_id, b64, raw.size())) { // Storage full
             _buf = []b;
             if (state == ST_REC) {
                 stop();
@@ -217,41 +212,69 @@ class UesNoteView extends WatchUi.View {
         _s = s;
     }
 
+    // Arc from 12 o'clock, clockwise, covering fraction f of the circle
+    private function arc(dc as Dc, r as Number, width as Number, f as Float) as Void {
+        if (f <= 0) {
+            return;
+        }
+        dc.setPenWidth(width);
+        if (f >= 1) {
+            dc.drawCircle(dc.getWidth() / 2, dc.getHeight() / 2, r);
+        } else {
+            dc.drawArc(dc.getWidth() / 2, dc.getHeight() / 2, r, Graphics.ARC_CLOCKWISE, 90, 90 - 360.0 * f);
+        }
+    }
+
+    // Pure black background: AMOLED pixels stay off except the few drawn ones.
     function onUpdate(dc as Dc) as Void {
+        if (dc has :setAntiAlias) {
+            dc.setAntiAlias(true);
+        }
         var w = dc.getWidth();
         var h = dc.getHeight();
+        var edge = w / 2;
         dc.setColor(Graphics.COLOR_WHITE, Graphics.COLOR_BLACK);
         dc.clear();
         var st = _s.state;
         var mid = Graphics.TEXT_JUSTIFY_CENTER | Graphics.TEXT_JUSTIFY_VCENTER;
         if (st == ST_REC || st == ST_STOPPING) {
+            var on = (System.getTimer() / 500) % 2 == 0;
+            dc.setColor(on ? Graphics.COLOR_RED : Graphics.COLOR_DK_RED, Graphics.COLOR_TRANSPARENT);
+            var rw = on ? 16 : 8;
+            arc(dc, edge - rw / 2 - 2, rw, 1.0); // pulsing ring
+            dc.setColor(Graphics.COLOR_DK_RED, Graphics.COLOR_TRANSPARENT);
+            arc(dc, edge - 28, 4, _s.elapsed().toFloat() / NOTE_MAX_S); // time left until auto-stop
             dc.setColor(Graphics.COLOR_RED, Graphics.COLOR_TRANSPARENT);
-            dc.fillCircle(w / 2, h * 38 / 100, h / 8);
+            dc.fillCircle(w * 36 / 100, h * 30 / 100, h / 16);
+            dc.drawText(w * 46 / 100, h * 30 / 100, Graphics.FONT_MEDIUM, "REC", Graphics.TEXT_JUSTIFY_LEFT | Graphics.TEXT_JUSTIFY_VCENTER);
             dc.setColor(Graphics.COLOR_WHITE, Graphics.COLOR_TRANSPARENT);
             var e = _s.elapsed();
-            dc.drawText(w / 2, h * 64 / 100, Graphics.FONT_NUMBER_MEDIUM, (e / 60).format("%02d") + ":" + (e % 60).format("%02d"), mid);
+            dc.drawText(w / 2, h * 55 / 100, Graphics.FONT_NUMBER_HOT, (e / 60).format("%02d") + ":" + (e % 60).format("%02d"), mid);
+            dc.setColor(Graphics.COLOR_LT_GRAY, Graphics.COLOR_TRANSPARENT);
+            dc.drawText(w / 2, h * 82 / 100, Graphics.FONT_XTINY, "START: stop", mid);
         } else if (st == ST_SENDING) {
             var p = _s.sender.progress();
+            dc.setColor(0x00D0B0, Graphics.COLOR_TRANSPARENT);
+            arc(dc, edge - 4, 6, (p[1] == 0) ? 0.0 : p[0].toFloat() / p[1]);
+            dc.setColor(Graphics.COLOR_WHITE, Graphics.COLOR_TRANSPARENT);
             dc.drawText(w / 2, h / 2, Graphics.FONT_MEDIUM, "Sending " + p[0] + "/" + p[1], mid);
         } else if (st == ST_DONE) {
-            dc.drawText(w / 2, h * 42 / 100, Graphics.FONT_LARGE, "Sent", mid);
-            dc.setColor(Graphics.COLOR_GREEN, Graphics.COLOR_TRANSPARENT); // FONT glyph for a check mark is not guaranteed
-            dc.setPenWidth(h / 40);
-            dc.drawLine(w * 42 / 100, h * 62 / 100, w * 48 / 100, h * 68 / 100);
-            dc.drawLine(w * 48 / 100, h * 68 / 100, w * 60 / 100, h * 55 / 100);
+            dc.setColor(Graphics.COLOR_GREEN, Graphics.COLOR_TRANSPARENT);
+            dc.setPenWidth(h / 16); // a font glyph for a check mark is not guaranteed
+            dc.drawLine(w * 30 / 100, h * 52 / 100, w * 44 / 100, h * 66 / 100);
+            dc.drawLine(w * 44 / 100, h * 66 / 100, w * 72 / 100, h * 34 / 100);
         } else if (st == ST_FAIL) {
-            dc.setColor(Graphics.COLOR_YELLOW, Graphics.COLOR_TRANSPARENT);
-            dc.drawText(w / 2, h * 42 / 100, Graphics.FONT_MEDIUM, "Not sent", mid);
-            dc.setColor(Graphics.COLOR_WHITE, Graphics.COLOR_TRANSPARENT);
+            dc.setColor(Graphics.COLOR_ORANGE, Graphics.COLOR_TRANSPARENT);
+            dc.drawText(w / 2, h * 44 / 100, Graphics.FONT_MEDIUM, "Not sent", mid);
             dc.drawText(w / 2, h * 58 / 100, Graphics.FONT_SMALL, "will retry", mid);
         } else {
             dc.setColor(Graphics.COLOR_RED, Graphics.COLOR_TRANSPARENT);
             dc.drawText(w / 2, h / 2, Graphics.FONT_MEDIUM, _s.err, mid);
         }
-        var n = _s.pending();
-        if (n > 0 && st != ST_SENDING) {
-            dc.setColor(Graphics.COLOR_LT_GRAY, Graphics.COLOR_TRANSPARENT);
-            dc.drawText(w / 2, h * 84 / 100, Graphics.FONT_XTINY, n + " pending", mid);
+        var n = _s.sender.ids().size() - ((st == ST_REC || st == ST_STOPPING) ? 1 : 0);
+        if (n > 0) { // notes still queued on the watch
+            dc.setColor(st == ST_FAIL ? Graphics.COLOR_ORANGE : Graphics.COLOR_LT_GRAY, Graphics.COLOR_TRANSPARENT);
+            dc.drawText(w / 2, h * 12 / 100, Graphics.FONT_XTINY, n + " on watch", mid);
         }
     }
 }

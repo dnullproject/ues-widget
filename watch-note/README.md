@@ -10,7 +10,7 @@ downloaded on the agent VM). Opening it records a voice note at once and uploads
 2. Press the hot key: a red dot and `mm:ss` appear, the watch vibrates, recording is already running.
 3. Press START (or BACK) to stop: the watch vibrates, shows `Sending 3/12`, then `Sent` and exits after ~2 s.
 
-Auto-stop after 3 minutes. If the upload fails the note stays in `Application.Storage`, the screen says `Not sent /
+Auto-stop after 3 minutes. Screen is pure black (AMOLED): a pulsing red ring while recording, a thin teal arc round the bezel for sync progress, a green check when done. If the upload fails the note stays in `Application.Storage`, the screen says `Not sent /
 will retry`, and a small `N pending` line shows on the next start. Retries run from a background temporal event every
 5 minutes and on the next app start. Leaving early (BACK while sending) also leaves the rest to the background.
 
@@ -29,11 +29,11 @@ answers 201 (complete). If Storage fills up, recording stops early and sends wha
 ```
 POST <baseUrl>/api/voice-notes/chunk        header X-API-Key: <apiKey>
 {"note_id": "<unix>-<5 digits>", "seq": 0, "last": false, "data": "<base64>",
- "format": "ogg_opus"            (seq 0 only), "recorded_at": <unix s> (seq 0 only), "duration_s": 42 (last chunk only)}
+ "format": "ogg_opus"            (seq 0 only), "recorded_at": <unix s> (seq 0 only), "duration_s": 42, "total_bytes": <sum of raw audio bytes>, "chunks": <count> (last chunk only)}
 ```
 
 One request in flight, chunks in order, uploading while still recording (the last chunk is held back until stop so it can
-carry `last`). 202/200 = next chunk, 201 = note complete (chunks deleted), 409 `{"missing":[..]}` = resume from the first
+carry `last`). 202/200 = next chunk, 201 = note complete and verified by the server (the only thing that deletes the chunks; a 2xx other than 201 on the last chunk counts as failed and is retried), 409 `{"missing":[..]}` = resume from the first
 missing seq (max 5 times), 400 = note dropped, anything else (401, 5xx, negative Garmin codes such as -104 = no phone)
 = keep and retry later.
 

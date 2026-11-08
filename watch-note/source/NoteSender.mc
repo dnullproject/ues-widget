@@ -5,7 +5,7 @@ import Toybox.System;
 
 // Persistent upload queue shared by the foreground recorder and the background retry.
 // Storage layout: "pend" = [note_id...] (oldest first), "m<id>" = meta dict, "c<id>.<seq>" = base64 chunk string.
-// Meta: c = chunks stored, n = next seq to send, done = recording finished, fmt, rec, dur, x = 409 resends.
+// Meta: c = chunks stored, b = raw audio bytes stored, n = next seq to send, done = recording finished, fmt, rec, dur, x = 409 resends.
 // Chunks stay until the server answers 201, so a 409 {"missing":[..]} can be answered by resending.
 (:background)
 class NoteSender {
@@ -38,12 +38,12 @@ class NoteSender {
     function create(id as String, fmt as String, rec as Number) as Void {
         var p = ids();
         p.add(id);
-        Application.Storage.setValue("m" + id, {"c" => 0, "n" => 0, "done" => false, "fmt" => fmt, "rec" => rec, "dur" => 0, "x" => 0});
+        Application.Storage.setValue("m" + id, {"c" => 0, "b" => 0, "n" => 0, "done" => false, "fmt" => fmt, "rec" => rec, "dur" => 0, "x" => 0});
         Application.Storage.setValue("pend", p);
     }
 
     // false when Storage is full (or the note is gone): the caller stops recording
-    function addChunk(id as String, b64 as String) as Boolean {
+    function addChunk(id as String, b64 as String, rawBytes as Number) as Boolean {
         var m = meta(id);
         if (m == null) {
             return false;
@@ -52,6 +52,7 @@ class NoteSender {
         try {
             Application.Storage.setValue("c" + id + "." + c, b64);
             m["c"] = c + 1;
+            m["b"] = (m["b"] as Number) + rawBytes;
             Application.Storage.setValue("m" + id, m);
         } catch (e) {
             Application.Storage.deleteValue("c" + id + "." + c);
@@ -115,17 +116,17 @@ class NoteSender {
         var done = m["done"] as Boolean;
         if (n >= c) {
             if (done) {
-                drop(id); // everything acked without a 201: nothing left to do
-                pump();
+                m["n"] = c - 1; // all acked but no 201 yet: resend the last chunk to get the verdict
+                Application.Storage.setValue("m" + id, m);
+                n = c - 1;
             } else {
                 _onIdle.invoke(); // still recording: wait for the next chunk
+                return;
             }
-            return;
         }
         var data = Application.Storage.getValue("c" + id + "." + n) as String?;
         if (data == null) {
-            m["n"] = n + 1;
-            Application.Storage.setValue("m" + id, m);
+            drop(id); // chunk lost from Storage: the note can never complete
             pump();
             return;
         }
@@ -137,6 +138,8 @@ class NoteSender {
         }
         if (last) {
             body["duration_s"] = m["dur"];
+            body["total_bytes"] = m["b"]; // the server answers 201 only if the assembled audio has this length
+            body["chunks"] = c;
         }
         var url = Application.Properties.getValue("baseUrl") as String;
         // strip a trailing slash so "<base>/" does not become "//api"
@@ -170,9 +173,10 @@ class NoteSender {
         }
         var n = m["n"] as Number;
         var c = m["c"] as Number;
-        if (code == 201 || (code >= 200 && code < 300 && n >= c - 1 && (m["done"] as Boolean))) {
-            drop(_id); // complete (or the last chunk acked)
-        } else if (code >= 200 && code < 300) {
+        var last = (m["done"] as Boolean) && n == c - 1;
+        if (code == 201) {
+            drop(_id); // only an explicit 201 confirms delivery
+        } else if (code >= 200 && code < 300 && !last) {
             m["n"] = n + 1;
             Application.Storage.setValue("m" + _id, m);
         } else if (code == 409 && (m["x"] as Number) < 5) {
