@@ -266,7 +266,7 @@ class UesNoteView extends WatchUi.View {
         } else if (st == ST_FAIL) {
             dc.setColor(Graphics.COLOR_ORANGE, Graphics.COLOR_TRANSPARENT);
             dc.drawText(w / 2, h * 44 / 100, Graphics.FONT_MEDIUM, "Not sent", mid);
-            dc.drawText(w / 2, h * 58 / 100, Graphics.FONT_SMALL, "will retry", mid);
+            dc.drawText(w / 2, h * 58 / 100, Graphics.FONT_SMALL, "will retry (" + _s.sender.lastCode + ")", mid);
         } else {
             dc.setColor(Graphics.COLOR_RED, Graphics.COLOR_TRANSPARENT);
             dc.drawText(w / 2, h / 2, Graphics.FONT_MEDIUM, _s.err, mid);

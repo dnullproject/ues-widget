@@ -9,6 +9,7 @@ import Toybox.System;
 // Chunks stay until the server answers 201, so a 409 {"missing":[..]} can be answered by resending.
 (:background)
 class NoteSender {
+    var lastCode as Number = 0; // HTTP status (or negative Connect IQ error) of the last reply, shown on failure
     var failed as Boolean = false; // last request failed (retry later); cleared by pump()
     private var _busy as Boolean = false;
     private var _sentLast as Boolean = false; // "last" flag of the request in flight, fixed when it was sent
@@ -159,8 +160,8 @@ class NoteSender {
                     "Content-Type" => Communications.REQUEST_CONTENT_TYPE_JSON,
                     "X-API-Key" => Application.Properties.getValue("apiKey") as String
                 },
-                // plain text avoids a -400 on an empty or non-JSON body; 409 is parsed by hand
-                :responseType => Communications.HTTP_RESPONSE_CONTENT_TYPE_TEXT_PLAIN
+                // must match the server's application/json reply, or Connect IQ reports -400 instead of the status
+                :responseType => Communications.HTTP_RESPONSE_CONTENT_TYPE_JSON
             },
             method(:onReceive)
         );
@@ -168,6 +169,7 @@ class NoteSender {
 
     function onReceive(code as Number, data as Dictionary or String or Null) as Void {
         _busy = false;
+        lastCode = code;
         var m = meta(_id);
         if (m == null) {
             pump();

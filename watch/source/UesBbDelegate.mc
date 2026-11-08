@@ -41,8 +41,8 @@ class UesBbDelegate extends System.ServiceDelegate {
                     "Content-Type" => Communications.REQUEST_CONTENT_TYPE_JSON,
                     "X-API-Key" => Application.Properties.getValue("apiKey") as String
                 },
-                // body is irrelevant; plain text avoids a -400 when it is empty or not JSON
-                :responseType => Communications.HTTP_RESPONSE_CONTENT_TYPE_TEXT_PLAIN
+                // must match the server's application/json reply, or Connect IQ reports -400 instead of the status
+                :responseType => Communications.HTTP_RESPONSE_CONTENT_TYPE_JSON
             },
             method(:onReceive)
         );
