@@ -9,8 +9,8 @@ case "$(basename "$PWD")" in watch-note) prefix=ues-note ;; *) prefix=ues-bb ;; 
 out="$PWD/bin"
 # Build from a temp copy so the stamp (and a baked key) never touch the checkout.
 src=$(mktemp -d); cp -r . "$src"; trap 'rm -rf "$src"' EXIT
-# Build stamp shown small at the bottom of the app: git short sha + UTC build time.
-echo "const BUILD = \"$(git rev-parse --short HEAD 2>/dev/null || echo dev)$(git diff --quiet 2>/dev/null || echo +) $(date -u +%m%d-%H%M)\";" > "$src/source/BuildInfo.mc"
+# Version shown small at the bottom of the app: semver from <app>/VERSION (bump it with every build you hand out).
+echo "const BUILD = \"v$(cat VERSION)\";" > "$src/source/BuildInfo.mc"
 # Sideloaded apps get no settings from the phone, so a personal build bakes $UES_API_KEY in (never in CI: the repo is public).
 if [ -n "${UES_API_KEY:-}" ]; then
   python3 - "$src/resources/properties.xml" <<'PY'

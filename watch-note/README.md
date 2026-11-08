@@ -44,3 +44,7 @@ Same `baseUrl` / `apiKey` properties as the BB widget (see `../watch/README.md`,
 `APP_DIR=watch-note watch/build.sh fenix847mm` builds keyless. CI does not build this app yet.
 
 Not verified on a real watch or the simulator (headless VM): the compile for `fenix847mm` is the only check.
+
+## Version
+
+Semver in `VERSION`, shown small at the bottom of the screen. Bump it for every build handed to the watch.

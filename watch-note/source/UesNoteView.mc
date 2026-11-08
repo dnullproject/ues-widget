@@ -254,6 +254,11 @@ class UesNoteView extends WatchUi.View {
             dc.setColor(Graphics.COLOR_WHITE, Graphics.COLOR_TRANSPARENT);
             var e = _s.elapsed();
             dc.drawText(w / 2, h * 55 / 100, Graphics.FONT_NUMBER_HOT, (e / 60).format("%02d") + ":" + (e % 60).format("%02d"), mid);
+            var sp = _s.sender.progress(); // small, so the red ring stays the main signal
+            if (sp[1] > 0) {
+                dc.setColor(0x00D0B0, Graphics.COLOR_TRANSPARENT);
+                dc.drawText(w / 2, h * 72 / 100, Graphics.FONT_XTINY, "sent " + sp[0] + "/" + sp[1], mid);
+            }
             dc.setColor(Graphics.COLOR_LT_GRAY, Graphics.COLOR_TRANSPARENT);
             dc.drawText(w / 2, h * 82 / 100, Graphics.FONT_XTINY, "START: stop", mid);
         } else if (st == ST_SENDING) {

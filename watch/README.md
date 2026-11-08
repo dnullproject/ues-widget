@@ -69,3 +69,7 @@ base64 -w0 developer_key.der
 ```
 
 Without either device secret the job only prints a warning and builds nothing.
+
+## Version
+
+Semver in `VERSION`, shown small at the bottom of the screen. Bump it for every build handed to the watch.

@@ -1,1 +1,1 @@
-const BUILD = "dev"; // overwritten by watch/build.sh in its temp copy
+const BUILD = "dev"; // overwritten by watch/build.sh from VERSION
