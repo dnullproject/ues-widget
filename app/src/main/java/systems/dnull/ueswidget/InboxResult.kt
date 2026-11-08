@@ -26,6 +26,7 @@ data class Suggestion(
     val severity: String? = null,
     val context: String? = null,
     val scheduledDate: String? = null,
+    val endTime: String? = null,
     val description: String? = null,
     val steps: List<String> = emptyList(),
     val note: String? = null,
@@ -54,6 +55,7 @@ fun parseInbox(json: String): InboxResult {
                     severity = s.str("severity"),
                     context = s.str("context"),
                     scheduledDate = s.str("scheduled_date"),
+                    endTime = s.str("end_time"),
                     description = s.str("description"),
                     steps = s.optJSONArray("steps")?.let { steps ->
                         (0 until steps.length()).map { steps.optString(it) }
@@ -78,11 +80,17 @@ fun freshSuggestions(items: List<InboxItem>, notified: Set<Int>, now: Instant = 
     }
 }
 
-/** "2026-11-09" -> "09.11", "2026-11-09T09:00" -> "09.11 09:00"; anything unparseable passes through unchanged. */
-fun isoDateLabel(date: String): String =
+/**
+ * "2026-11-09" -> "09.11"; a timed date gets its slot, end "HH:MM" or the server's 1 h default:
+ * ("2026-11-09T14:00", "16:00") -> "09.11 14:00–16:00". Anything unparseable passes through unchanged.
+ */
+fun isoDateLabel(date: String, endTime: String? = null): String =
     try {
-        if ('T' in date) LocalDateTime.parse(date).format(DateTimeFormatter.ofPattern("dd.MM HH:mm"))
-        else LocalDate.parse(date).format(DateTimeFormatter.ofPattern("dd.MM"))
+        if ('T' in date) {
+            val start = LocalDateTime.parse(date)
+            val end = endTime ?: start.plusHours(1).format(DateTimeFormatter.ofPattern("HH:mm"))
+            start.format(DateTimeFormatter.ofPattern("dd.MM HH:mm")) + "–" + end
+        } else LocalDate.parse(date).format(DateTimeFormatter.ofPattern("dd.MM"))
     } catch (e: Exception) {
         date
     }
@@ -98,7 +106,7 @@ fun suggestionTitle(item: InboxItem): String {
 fun suggestionMeta(item: InboxItem): String {
     val s = item.suggestion ?: return ""
     return buildList {
-        add(s.scheduledDate?.let(::isoDateLabel) ?: "без дати")
+        add(s.scheduledDate?.let { isoDateLabel(it, s.endTime) } ?: "без дати")
         add("${s.sp} SP")
         s.severity?.let { add(it) }
         s.context?.let { add(it) }
