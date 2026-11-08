@@ -1,0 +1,16 @@
+<?xml version="1.0"?>
+<iq:manifest xmlns:iq="http://www.garmin.com/xml/connectiq" version="3">
+    <iq:application entry="UesNoteApp" id="6D1B2C8E4F5A4E27B3C9A07E51D84F36" launcherIcon="@Drawables.LauncherIcon" minApiLevel="6.0.3" name="@Strings.AppName" type="watch-app">
+        <iq:products>
+            <!-- Fenix 8 AMOLED 47/51 mm (one id); other devices are not downloaded locally -->
+            <iq:product id="fenix847mm"/>
+        </iq:products>
+        <iq:permissions>
+            <iq:uses-permission id="AudioInput"/>
+            <iq:uses-permission id="Background"/>
+            <iq:uses-permission id="Communications"/>
+        </iq:permissions>
+        <iq:languages/>
+        <iq:barrels/>
+    </iq:application>
+</iq:manifest>
