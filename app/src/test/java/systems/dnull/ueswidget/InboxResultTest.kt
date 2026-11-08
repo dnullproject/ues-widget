@@ -78,6 +78,7 @@ class InboxResultTest {
         assertEquals("09.11 · 0 SP", suggestionMeta(bare.copy(suggestion = Suggestion("X", "two_minute", scheduledDate = "2026-11-09"))))
 
         assertEquals("09.11", isoDateLabel("2026-11-09"))
+        assertEquals("09.11 09:00", isoDateLabel("2026-11-09T09:00"))
         assertEquals("nope", isoDateLabel("nope"))
     }
 }

@@ -3,6 +3,7 @@ package systems.dnull.ueswidget
 import org.json.JSONObject
 import java.time.Instant
 import java.time.LocalDate
+import java.time.LocalDateTime
 import java.time.OffsetDateTime
 import java.time.format.DateTimeFormatter
 import java.time.temporal.ChronoUnit
@@ -77,10 +78,11 @@ fun freshSuggestions(items: List<InboxItem>, notified: Set<Int>, now: Instant = 
     }
 }
 
-/** "2026-11-09" -> "09.11"; anything unparseable passes through unchanged. */
+/** "2026-11-09" -> "09.11", "2026-11-09T09:00" -> "09.11 09:00"; anything unparseable passes through unchanged. */
 fun isoDateLabel(date: String): String =
     try {
-        LocalDate.parse(date).format(DateTimeFormatter.ofPattern("dd.MM"))
+        if ('T' in date) LocalDateTime.parse(date).format(DateTimeFormatter.ofPattern("dd.MM HH:mm"))
+        else LocalDate.parse(date).format(DateTimeFormatter.ofPattern("dd.MM"))
     } catch (e: Exception) {
         date
     }
