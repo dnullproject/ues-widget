@@ -11,6 +11,7 @@ import Toybox.System;
 class NoteSender {
     var failed as Boolean = false; // last request failed (retry later); cleared by pump()
     private var _busy as Boolean = false;
+    private var _sentLast as Boolean = false; // "last" flag of the request in flight, fixed when it was sent
     private var _id as String = "";
     private var _onIdle as Method() as Void;
 
@@ -148,6 +149,7 @@ class NoteSender {
         }
         _busy = true;
         _id = id;
+        _sentLast = last;
         Communications.makeWebRequest(
             url + "/api/voice-notes/chunk",
             body,
@@ -173,7 +175,8 @@ class NoteSender {
         }
         var n = m["n"] as Number;
         var c = m["c"] as Number;
-        var last = (m["done"] as Boolean) && n == c - 1;
+        // judge the reply by what was sent: recording may have stopped while a mid-note chunk was in flight
+        var last = _sentLast;
         if (code == 201) {
             drop(_id); // only an explicit 201 confirms delivery
         } else if (code >= 200 && code < 300 && !last) {
