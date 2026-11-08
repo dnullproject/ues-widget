@@ -68,10 +68,21 @@ class UesWidgetReceiver : GlanceAppWidgetReceiver() {
     // The periodic APPWIDGET_UPDATE only recomposes a live Glance session; bump the tick so data reloads too.
     override fun onUpdate(context: Context, appWidgetManager: AppWidgetManager, appWidgetIds: IntArray) {
         super.onUpdate(context, appWidgetManager, appWidgetIds)
+        RefreshService.start(context)
         val pending = goAsync()
         CoroutineScope(Dispatchers.Default).launch {
             try { refreshAll(context) } finally { pending.finish() }
         }
+    }
+
+    override fun onEnabled(context: Context) {
+        super.onEnabled(context)
+        RefreshService.start(context)
+    }
+
+    override fun onDisabled(context: Context) {
+        super.onDisabled(context)
+        RefreshService.stop(context)
     }
 }
 
@@ -100,6 +111,7 @@ private suspend fun redraw(context: Context, id: GlanceId) {
 
 class RefreshCallback : ActionCallback {
     override suspend fun onAction(context: Context, glanceId: GlanceId, parameters: ActionParameters) {
+        RefreshService.start(context) // a widget tap may start it even when Android refused a background start
         refresh(context, glanceId)
     }
 }

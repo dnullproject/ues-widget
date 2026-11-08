@@ -25,6 +25,9 @@ class SettingsActivity : Activity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        // The service's notification needs this from API 33; the service runs either way.
+        if (android.os.Build.VERSION.SDK_INT >= 33) requestPermissions(arrayOf(android.Manifest.permission.POST_NOTIFICATIONS), 0)
+        RefreshService.start(this)
         pad = (16 * resources.displayMetrics.density).toInt()
         col = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; setPadding(pad, pad, pad, pad) }
         col.addView(TextView(this).apply { text = "UES Widget"; textSize = 22f; setPadding(0, 0, 0, pad) })
