@@ -1,0 +1,5 @@
+<resources>
+    <string id="AppName">UES BB</string>
+    <string id="BaseUrlTitle">UES base URL</string>
+    <string id="ApiKeyTitle">API key</string>
+</resources>
