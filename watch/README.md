@@ -15,19 +15,20 @@ negative = Garmin error, e.g. -104 = phone not connected: the watch sends reques
 
 ## Settings
 
-Connect IQ app on the phone -> UES BB -> Settings (or Garmin Connect -> device -> Connect IQ apps):
-
-- `baseUrl`, default `https://memory-ues.kudu-skate.ts.net`
+- `baseUrl`, default `https://memory-ues.kudu-skate.ts.net` (the phone needs Tailscale; Garmin Connect makes the request)
 - `apiKey`, no default (never committed)
+
+A sideloaded app gets no settings from the phone, so the personal build bakes the key in:
+`just watch-prg` (repo root) reads `UES_API_KEY` from 1Password via fnox and writes `watch/bin/ues-bb-<device>.prg`.
+Never attach such a build to a release or CI artifact: this repo is public. CI builds keyless, only to prove it compiles.
+A Connect IQ store (beta) install does get phone settings, so a keyless build works there.
 
 ## Install
 
-1. Get `ues-bb-<device>.prg` from the GitHub Release (or the `ues-bb-watch` CI artifact). Device ids: `fenix843mm`,
-   `fenix847mm`, `fenix8pro47mm`; a `.prg` only runs on its own device.
+1. `just watch-prg fenix847mm` (or `fenix843mm`, `fenix8pro47mm`; a `.prg` only runs on its own device).
 2. Connect the watch over USB, copy the file to `GARMIN/APPS/`, eject.
-3. Open the widget once on the watch (it registers the 5 minute background event), then set `apiKey` in the phone app.
-
-Alternatively upload to the Connect IQ store as a beta app and install from the phone.
+3. Open the widget once on the watch: it registers the 5 minute background event. The view then shows the last sent
+   level, its time and the last HTTP status (201 = stored, 401 = wrong key, negative = no phone/connection).
 
 ## Battery
 

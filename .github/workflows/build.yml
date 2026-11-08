@@ -104,4 +104,4 @@ jobs:
         if: steps.dev.outputs.have == 'true' && startsWith(github.ref, 'refs/tags/v')
         env:
           GH_TOKEN: ${{ github.token }}
-        run: gh release upload "$GITHUB_REF_NAME" watch/bin/*.prg --clobber
+        run: gh release upload "$GITHUB_REF_NAME" watch/bin/*.prg --clobber  # keyless: only useful for a store install
