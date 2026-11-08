@@ -158,7 +158,11 @@ private suspend fun loadSnapshot(context: Context): Snapshot = withContext(Dispa
             TodayResult(emptyList(), (e.message ?: e.javaClass.simpleName).take(40))
         }
     }
-    val extras = async { fetchVitals(url, key) }
+    val extras = async {
+        val fetched = fetchVitals(url, key)
+        InboxNotifier.notifyNew(context, fetched.inbox)
+        fetched.vitals
+    }
     val sys = async { if (st.showSystem || st.showAgents) fetchSystem(dashboard, key) else null }
     Snapshot(st, dashboard, today.await(), extras.await(), sys.await(), actionError)
 }

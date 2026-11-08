@@ -10,6 +10,7 @@ Add this repo's GitHub Releases to [Obtainium](https://obtainium.imranr.dev/) (`
 
 Open the app and fill in: Memory API base URL, API key, dashboard URL. Save, then add the "UES Widget" widget to the home screen.
 The widget refreshes every minute while the screen is on (a foreground service with a silent notification), plus via the ⟳ button; the time next to ⟳ is the last fetch. Tapping the list opens the dashboard.
+When a new inbox note gets an AI suggestion, a heads-up notification pops up with one-tap actions (✓ create task, Someday, 🗑 trash).
 
 ## Build
 
