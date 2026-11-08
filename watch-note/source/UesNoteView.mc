@@ -143,7 +143,7 @@ class NoteSession {
         }
         var m = sender.meta(_id);
         if (m == null || (m["c"] as Number) == 0) {
-            sender.drop(_id);
+            sender.drop(_id, "nothing recorded");
             fail("Nothing recorded");
             return;
         }
@@ -155,7 +155,7 @@ class NoteSession {
 
     private function fail(msg as String) as Void {
         if (_id.length() > 0) {
-            sender.drop(_id); // an unfinished note would block the queue
+            sender.drop(_id, msg); // an unfinished note would block the queue
         }
         err = msg;
         state = ST_ERR;
@@ -236,7 +236,8 @@ class UesNoteView extends WatchUi.View {
         dc.setColor(Graphics.COLOR_WHITE, Graphics.COLOR_BLACK);
         dc.clear();
         dc.setColor(Graphics.COLOR_DK_GRAY, Graphics.COLOR_TRANSPARENT);
-        dc.drawText(dc.getWidth() / 2, dc.getHeight() * 93 / 100, Graphics.FONT_XTINY, BUILD,
+        var ld = Application.Storage.getValue("lastDrop");
+        dc.drawText(dc.getWidth() / 2, dc.getHeight() * 93 / 100, Graphics.FONT_XTINY, (ld == null) ? BUILD : BUILD + " | " + ld,
             Graphics.TEXT_JUSTIFY_CENTER | Graphics.TEXT_JUSTIFY_VCENTER);
         var st = _s.state;
         var mid = Graphics.TEXT_JUSTIFY_CENTER | Graphics.TEXT_JUSTIFY_VCENTER;

@@ -72,7 +72,11 @@ class NoteSender {
         }
     }
 
-    function drop(id as String) as Void {
+    // why is shown small on screen ("lastDrop"), so a lost note can be explained; "" for a delivered one
+    function drop(id as String, why as String) as Void {
+        if (!why.equals("")) {
+            Application.Storage.setValue("lastDrop", why + " " + id.substring(id.length() - 5, id.length()));
+        }
         var m = meta(id);
         var c = (m == null) ? 0 : m["c"] as Number;
         for (var i = 0; i < c; i++) {
@@ -84,13 +88,17 @@ class NoteSender {
         Application.Storage.setValue("pend", p);
     }
 
-    // A crash mid-recording leaves an unfinished note at the head of the queue; drop those on app start.
+    // Recording interrupted before finish() (crash, or the app left while stopping): send the audio
+    // already stored instead of losing it; only a note without any chunk is dropped.
     function dropUnfinished() as Void {
         var p = ids();
         for (var i = 0; i < p.size(); i++) {
             var m = meta(p[i]);
-            if (m == null || !(m["done"] as Boolean)) {
-                drop(p[i]);
+            if (m == null || (m["c"] as Number) == 0) {
+                drop(p[i], "empty");
+            } else if (!(m["done"] as Boolean)) {
+                m["done"] = true;
+                Application.Storage.setValue("m" + p[i], m);
             }
         }
     }
@@ -109,7 +117,7 @@ class NoteSender {
         var id = p[0];
         var m = meta(id);
         if (m == null) {
-            drop(id);
+            drop(id, "no meta");
             pump();
             return;
         }
@@ -128,7 +136,7 @@ class NoteSender {
         }
         var data = Application.Storage.getValue("c" + id + "." + n) as String?;
         if (data == null) {
-            drop(id); // chunk lost from Storage: the note can never complete
+            drop(id, "chunk lost"); // chunk lost from Storage: the note can never complete
             pump();
             return;
         }
@@ -180,7 +188,7 @@ class NoteSender {
         // judge the reply by what was sent: recording may have stopped while a mid-note chunk was in flight
         var last = _sentLast;
         if (code == 201) {
-            drop(_id); // only an explicit 201 confirms delivery
+            drop(_id, ""); // only an explicit 201 confirms delivery
         } else if (code >= 200 && code < 300 && !last) {
             m["n"] = n + 1;
             Application.Storage.setValue("m" + _id, m);
@@ -189,7 +197,7 @@ class NoteSender {
             m["n"] = firstMissing(data, n);
             Application.Storage.setValue("m" + _id, m);
         } else if (code == 400 || code == 409) {
-            drop(_id); // the server will never accept this note: do not block the queue
+            drop(_id, "rejected " + code); // the server will never accept this note: do not block the queue
         } else {
             failed = true; // 401, 5xx, no phone / connection (negative codes): keep and retry later
             _onIdle.invoke();
