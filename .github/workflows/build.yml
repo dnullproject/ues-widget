@@ -44,3 +44,64 @@ jobs:
           gradle assembleRelease
           cp app/build/outputs/apk/release/*.apk "ues-widget-${VERSION_NAME}.apk"
           gh release create "$TAG" "ues-widget-${VERSION_NAME}.apk" --title "$TAG" --generate-notes
+
+  # Garmin only serves device files to a logged-in account, so this job needs one of:
+  #   secret CIQ_DEVICES_B64                          (tar.gz of ~/.Garmin/ConnectIQ/Devices/<ids>, see watch/README.md)
+  #   secrets GARMIN_USERNAME + GARMIN_PASSWORD and variable CIQ_AGREEMENT_HASH
+  # Without either it only warns, so PRs from forks stay green.
+  watch:
+    needs: build
+    runs-on: ubuntu-latest
+    env:
+      CIQ_SDK_VERSION: "9.3.0"
+      CIQ_SDK_MANAGER_VERSION: v0.8.4
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+      - name: Install Connect IQ SDK and device files
+        id: dev
+        env:
+          CIQ_DEVICES_B64: ${{ secrets.CIQ_DEVICES_B64 }}
+          GARMIN_USERNAME: ${{ secrets.GARMIN_USERNAME }}
+          GARMIN_PASSWORD: ${{ secrets.GARMIN_PASSWORD }}
+          CIQ_AGREEMENT_HASH: ${{ vars.CIQ_AGREEMENT_HASH }}
+        run: |
+          devdir="$HOME/.Garmin/ConnectIQ/Devices"
+          mkdir -p "$devdir"
+          if [ -n "$CIQ_DEVICES_B64" ]; then
+            echo "$CIQ_DEVICES_B64" | base64 -d | tar xz -C "$devdir"
+          elif [ -n "$GARMIN_USERNAME" ] && [ -n "$GARMIN_PASSWORD" ] && [ -n "$CIQ_AGREEMENT_HASH" ]; then
+            curl -fsS https://raw.githubusercontent.com/lindell/connect-iq-sdk-manager-cli/master/install.sh \
+              | sh -s -- -b "$HOME/.local/bin" "$CIQ_SDK_MANAGER_VERSION"
+            "$HOME/.local/bin/connect-iq-sdk-manager" agreement accept --acceptance-hash="$CIQ_AGREEMENT_HASH"
+            "$HOME/.local/bin/connect-iq-sdk-manager" login
+            "$HOME/.local/bin/connect-iq-sdk-manager" device download --manifest=watch/manifest.xml
+          else
+            echo "::warning::watch not built: set CIQ_DEVICES_B64 or GARMIN_USERNAME/GARMIN_PASSWORD + CIQ_AGREEMENT_HASH (see watch/README.md)"
+            exit 0
+          fi
+          # the SDK zip itself is public
+          zip=$(curl -fsS https://developer.garmin.com/downloads/connect-iq/sdks/sdks.json \
+            | jq -r --arg v "$CIQ_SDK_VERSION" '.[] | select(.version == $v) | .linux')
+          curl -fsSL -o "$RUNNER_TEMP/sdk.zip" "https://developer.garmin.com/downloads/connect-iq/sdks/$zip"
+          unzip -q "$RUNNER_TEMP/sdk.zip" -d "$HOME/ciq-sdk"
+          echo "$HOME/ciq-sdk/bin" >> "$GITHUB_PATH"
+          echo "have=true" >> "$GITHUB_OUTPUT"
+      - name: Build
+        if: steps.dev.outputs.have == 'true'
+        env:
+          CIQ_DEVELOPER_KEY_B64: ${{ secrets.CIQ_DEVELOPER_KEY_B64 }}
+        run: watch/build.sh
+      - uses: actions/upload-artifact@v4
+        if: steps.dev.outputs.have == 'true'
+        with:
+          name: ues-bb-watch
+          path: watch/bin/*.prg
+      - name: Attach to release
+        if: steps.dev.outputs.have == 'true' && startsWith(github.ref, 'refs/tags/v')
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release upload "$GITHUB_REF_NAME" watch/bin/*.prg --clobber  # keyless: only useful for a store install

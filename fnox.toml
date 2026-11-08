@@ -1,0 +1,6 @@
+[providers]
+onepass = { type = "1password", vault = "dnull" }
+
+[secrets]
+# memory API key, baked into personal watch builds (just watch-prg)
+UES_API_KEY = { provider = "onepass", value = "op://dnull/ues-api/api_key" }
