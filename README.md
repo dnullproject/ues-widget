@@ -9,7 +9,7 @@ Add this repo's GitHub Releases to [Obtainium](https://obtainium.imranr.dev/) (`
 ## First run
 
 Open the app and fill in: Memory API base URL, API key, dashboard URL. Save, then add the "UES Widget" widget to the home screen.
-The widget refreshes every 30 min or via the ⟳ button; tapping the list opens the dashboard.
+The widget refreshes every 30 min or via the ⟳ button (the time next to it is the last fetch); tapping the list opens the dashboard.
 
 ## Build
 

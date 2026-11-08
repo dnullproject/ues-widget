@@ -48,6 +48,8 @@ import androidx.glance.appwidget.state.updateAppWidgetState
 import androidx.glance.currentState
 import androidx.glance.state.PreferencesGlanceStateDefinition
 import kotlinx.coroutines.withContext
+import java.time.LocalTime
+import java.time.format.DateTimeFormatter
 
 // Status colours stay Dracula (dashboard theme.css); bg/text/muted/accent come from WidgetStyle.
 private val GREEN = ColorProvider(Color(0xFF50FA7B))
@@ -75,14 +77,25 @@ class UesWidgetReceiver : GlanceAppWidgetReceiver() {
 
 private val TICK = longPreferencesKey("tick")
 
-/** Reload one widget: a Glance update alone would reuse the data the running session already holds. */
+// The last fetch. Fetching happens in the caller (receiver, action, settings), never in the composition: Glance
+// cancels its session 45 s after a render (5 s when the phone idles), which silently dropped in-session fetches.
+@Volatile private var latest: Snapshot? = null
+
+/** Fetch fresh data, then redraw one widget from it. */
 suspend fun refresh(context: Context, id: GlanceId) {
-    updateAppWidgetState(context, id) { it[TICK] = System.nanoTime() }
-    UesWidget().update(context, id)
+    latest = loadSnapshot(context)
+    redraw(context, id)
 }
 
 suspend fun refreshAll(context: Context) {
-    GlanceAppWidgetManager(context).getGlanceIds(UesWidget::class.java).forEach { refresh(context, it) }
+    latest = loadSnapshot(context)
+    GlanceAppWidgetManager(context).getGlanceIds(UesWidget::class.java).forEach { redraw(context, it) }
+}
+
+// A Glance update alone would reuse what the running session already holds; the tick makes it pick up `latest`.
+private suspend fun redraw(context: Context, id: GlanceId) {
+    updateAppWidgetState(context, id) { it[TICK] = System.nanoTime() }
+    UesWidget().update(context, id)
 }
 
 class RefreshCallback : ActionCallback {
@@ -116,6 +129,7 @@ private data class Snapshot(
     val vitals: Vitals,
     val system: SystemSnapshot?,
     val actionError: String?,
+    val fetchedAt: String = LocalTime.now().format(DateTimeFormatter.ofPattern("HH:mm")),
 )
 
 private suspend fun loadSnapshot(context: Context): Snapshot = withContext(Dispatchers.IO) {
@@ -146,12 +160,12 @@ class UesWidget : GlanceAppWidget() {
     override val stateDefinition = PreferencesGlanceStateDefinition
 
     override suspend fun provideGlance(context: Context, id: GlanceId) {
-        val first = loadSnapshot(context)
+        val first = latest ?: loadSnapshot(context).also { latest = it }
         provideContent {
             val tick = currentState(TICK) ?: 0L
-            // Reloads whenever refresh() bumps the tick; keeps showing the previous snapshot meanwhile.
+            // refresh() fetched before bumping the tick, so this only reads the cache.
             val startTick = remember { tick }
-            val snap by produceState(first, tick) { if (tick != startTick) value = loadSnapshot(context) }
+            val snap by produceState(first, tick) { if (tick != startTick) value = latest ?: first }
             Content(snap)
         }
     }
@@ -167,7 +181,7 @@ private fun Content(snap: Snapshot) {
         Intent(Intent.ACTION_VIEW, Uri.parse(snap.dashboard)).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
     )
     Column(GlanceModifier.fillMaxSize().background(st.bg).cornerRadius(st.corner.dp).padding(12.dp)) {
-        Header(st, result, vitals.bb ?: result?.bbLevel, open)
+        Header(st, result, vitals.bb ?: result?.bbLevel, snap.fetchedAt, open)
         if (snap.actionError != null) Text(snap.actionError, style = TextStyle(color = RED, fontSize = st.sp(12)))
         if (st.showStatus) Status(st, result)
         val msg = when {
@@ -200,7 +214,7 @@ private fun bbColor(level: Int) = when {
 }
 
 @Composable
-private fun Header(st: WidgetStyle, result: TodayResult?, bb: Int?, open: Action) {
+private fun Header(st: WidgetStyle, result: TodayResult?, bb: Int?, fetchedAt: String, open: Action) {
     val counts = if (result != null && result.error == null && result.items.isNotEmpty())
         "  ${result.done}/${result.items.size}" else ""
     Row(GlanceModifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
@@ -212,6 +226,8 @@ private fun Header(st: WidgetStyle, result: TodayResult?, bb: Int?, open: Action
         if (bb != null) {
             Text("⚡$bb", style = TextStyle(color = bbColor(bb), fontWeight = FontWeight.Bold, fontSize = st.sp(15)))
         }
+        // When the data was fetched, so a stale widget is visible at a glance.
+        Text(" $fetchedAt", style = TextStyle(color = st.muted, fontSize = st.sp(11)))
         Text(
             "⟳",
             GlanceModifier.clickable(actionRunCallback<RefreshCallback>()).padding(start = 10.dp, end = 2.dp),
