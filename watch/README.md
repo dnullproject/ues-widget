@@ -19,7 +19,7 @@ negative = Garmin error, e.g. -104 = phone not connected: the watch sends reques
 - `apiKey`, no default (never committed)
 
 A sideloaded app gets no settings from the phone, so the personal build bakes the key in:
-`just watch-prg` (repo root) reads `UES_API_KEY` from 1Password via fnox and writes `watch/bin/ues-bb-<device>.prg`.
+`just watch-prg` (repo root) reads `UES_API_KEY` from 1Password via fnox and writes `watch/bin/ues-bb-<device>-v<VERSION>.prg`.
 Never attach such a build to a release or CI artifact: this repo is public. CI builds keyless, only to prove it compiles.
 A Connect IQ store (beta) install does get phone settings, so a keyless build works there.
 
@@ -32,7 +32,7 @@ Verified: `fenix847mm` (covers the 47 and 51 mm cases) compiles with SDK 9.3.0.
 ## Install
 
 1. `just watch-prg fenix847mm` (or `fenix843mm`, `fenix8pro47mm`; a `.prg` only runs on its own device).
-2. Connect the watch over USB, copy the file to `GARMIN/APPS/`, eject.
+2. Connect the watch over USB, delete the previous `ues-bb-*.prg` from `GARMIN/APPS/` if it is still there, copy the new file, eject. The file name does not matter to the watch (the app id inside does).
 3. Open the widget once on the watch: it registers the 5 minute background event. The view then shows the last sent
    level, its time and the last HTTP status (201 = stored, 401 = wrong key, negative = no phone/connection).
 

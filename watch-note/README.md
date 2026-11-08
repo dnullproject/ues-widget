@@ -40,7 +40,7 @@ missing seq (max 5 times), 400 = note dropped, anything else (401, 5xx, negative
 ## Settings and build
 
 Same `baseUrl` / `apiKey` properties as the BB widget (see `../watch/README.md`, including the local toolchain).
-`just note-prg [device]` builds `watch-note/bin/ues-note-<device>.prg` with the key baked in (copy to `GARMIN/APPS/`).
+`just note-prg [device]` builds `watch-note/bin/ues-note-<device>-v<VERSION>.prg` with the key baked in (copy to `GARMIN/APPS/`).
 `APP_DIR=watch-note watch/build.sh fenix847mm` builds keyless. CI does not build this app yet.
 
 Not verified on a real watch or the simulator (headless VM): the compile for `fenix847mm` is the only check.

@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Build <app>/bin/<prefix>-<device>.prg for each device (default: all in manifest.xml).
+# Build <app>/bin/<prefix>-<device>-v<VERSION>.prg for each device (default: all in manifest.xml).
 # App: $APP_DIR, default watch (-> ues-bb); APP_DIR=watch-note -> ues-note.
 # Needs `monkeyc` on PATH and the device files in ~/.Garmin/ConnectIQ/Devices.
 # Signing key: $CIQ_DEVELOPER_KEY_B64 (base64 DER) if set, else a throwaway key (the .prg works for sideloading).
@@ -31,6 +31,6 @@ else
 fi
 mkdir -p "$out"
 for d in "${devices[@]}"; do
-  monkeyc -d "$d" -f monkey.jungle -o "$out/$prefix-$d.prg" -y "$key" -w
+  monkeyc -d "$d" -f monkey.jungle -o "$out/$prefix-$d-v$(cat VERSION).prg" -y "$key" -w
 done
 rm -f "$key"
