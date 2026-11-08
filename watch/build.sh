@@ -7,17 +7,20 @@ set -euo pipefail
 cd "$(dirname "$0")/../${APP_DIR:-watch}"
 case "$(basename "$PWD")" in watch-note) prefix=ues-note ;; *) prefix=ues-bb ;; esac
 out="$PWD/bin"
+# Build from a temp copy so the stamp (and a baked key) never touch the checkout.
+src=$(mktemp -d); cp -r . "$src"; trap 'rm -rf "$src"' EXIT
+# Build stamp shown small at the bottom of the app: git short sha + UTC build time.
+echo "const BUILD = \"$(git rev-parse --short HEAD 2>/dev/null || echo dev)$(git diff --quiet 2>/dev/null || echo +) $(date -u +%m%d-%H%M)\";" > "$src/source/BuildInfo.mc"
 # Sideloaded apps get no settings from the phone, so a personal build bakes $UES_API_KEY in (never in CI: the repo is public).
 if [ -n "${UES_API_KEY:-}" ]; then
-  src=$(mktemp -d); cp -r . "$src"; trap 'rm -rf "$src"' EXIT
   python3 - "$src/resources/properties.xml" <<'PY'
 import sys, xml.sax.saxutils as x, os
 p = sys.argv[1]; s = open(p).read()
 open(p, "w").write(s.replace('<property id="apiKey" type="string"></property>',
     '<property id="apiKey" type="string">' + x.escape(os.environ["UES_API_KEY"]) + '</property>'))
 PY
-  cd "$src"
 fi
+cd "$src"
 devices=("$@")
 [ ${#devices[@]} -gt 0 ] || mapfile -t devices < <(grep -o 'product id="[^"]*"' manifest.xml | cut -d'"' -f2)
 key=$(mktemp --suffix=.der)

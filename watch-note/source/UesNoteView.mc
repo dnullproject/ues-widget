@@ -235,6 +235,9 @@ class UesNoteView extends WatchUi.View {
         var edge = w / 2;
         dc.setColor(Graphics.COLOR_WHITE, Graphics.COLOR_BLACK);
         dc.clear();
+        dc.setColor(Graphics.COLOR_DK_GRAY, Graphics.COLOR_TRANSPARENT);
+        dc.drawText(dc.getWidth() / 2, dc.getHeight() * 93 / 100, Graphics.FONT_XTINY, BUILD,
+            Graphics.TEXT_JUSTIFY_CENTER | Graphics.TEXT_JUSTIFY_VCENTER);
         var st = _s.state;
         var mid = Graphics.TEXT_JUSTIFY_CENTER | Graphics.TEXT_JUSTIFY_VCENTER;
         if (st == ST_REC || st == ST_STOPPING) {

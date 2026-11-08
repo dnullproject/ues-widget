@@ -51,5 +51,8 @@ class UesBbView extends WatchUi.View {
             dc.drawText(dc.getWidth() / 2, h * (i + 2) / 6, Graphics.FONT_MEDIUM, l[i],
                 Graphics.TEXT_JUSTIFY_CENTER | Graphics.TEXT_JUSTIFY_VCENTER);
         }
+        dc.setColor(Graphics.COLOR_DK_GRAY, Graphics.COLOR_TRANSPARENT);
+        dc.drawText(dc.getWidth() / 2, h * 90 / 100, Graphics.FONT_XTINY, BUILD,
+            Graphics.TEXT_JUSTIFY_CENTER | Graphics.TEXT_JUSTIFY_VCENTER);
     }
 }
