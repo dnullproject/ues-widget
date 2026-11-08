@@ -25,7 +25,7 @@ A Connect IQ store (beta) install does get phone settings, so a keyless build wo
 
 ## Install
 
-1. `just watch-prg fenix847mm` (or `fenix843mm`, `fenix8pro47mm`; a `.prg` only runs on its own device).
+1. `just watch-prg fenix847mm` (or `fenix843mm`, `fenix851mm`, `fenix8pro47mm`; a `.prg` only runs on its own device).
 2. Connect the watch over USB, copy the file to `GARMIN/APPS/`, eject.
 3. Open the widget once on the watch: it registers the 5 minute background event. The view then shows the last sent
    level, its time and the last HTTP status (201 = stored, 401 = wrong key, negative = no phone/connection).
@@ -47,7 +47,7 @@ Pick one:
 
 - Secret `CIQ_DEVICES_B64` (simplest, no password in GitHub): after downloading the four devices in the Connect IQ
   SDK Manager on your computer, run
-  `tar czf - -C ~/.Garmin/ConnectIQ/Devices fenix843mm fenix847mm fenix8pro47mm | base64 -w0`
+  `tar czf - -C ~/.Garmin/ConnectIQ/Devices fenix843mm fenix847mm fenix851mm fenix8pro47mm | base64 -w0`
   (macOS: `base64 | tr -d '\n'`; the folder is `~/Library/Application Support/Garmin/ConnectIQ/Devices`) and store the output.
 - Or secrets `GARMIN_USERNAME`, `GARMIN_PASSWORD` (no MFA on that account) and repository variable `CIQ_AGREEMENT_HASH`
   (run `connect-iq-sdk-manager agreement view` from

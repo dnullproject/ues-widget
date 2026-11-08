@@ -48,9 +48,18 @@ class UesBbDelegate extends System.ServiceDelegate {
         );
     }
 
-    // Background code may not write Storage on every device, so hand the result to the app (onBackgroundData).
+    // Write Storage here so dedup works while the widget is closed (onBackgroundData only runs when it is open);
+    // also hand the result to the app in case this device refuses background writes.
     function onReceive(code as Number, data as Dictionary or String or Null) as Void {
         var ok = code >= 200 && code < 300;
+        try {
+            Application.Storage.setValue("status", code);
+            if (ok) {
+                Application.Storage.setValue("sentTs", _ts);
+                Application.Storage.setValue("level", _level);
+            }
+        } catch (e) {
+        }
         Background.exit({"status" => code, "sentTs" => ok ? _ts : null, "level" => ok ? _level : null});
     }
 }
