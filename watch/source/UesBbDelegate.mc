@@ -48,12 +48,9 @@ class UesBbDelegate extends System.ServiceDelegate {
         );
     }
 
+    // Background code may not write Storage on every device, so hand the result to the app (onBackgroundData).
     function onReceive(code as Number, data as Dictionary or String or Null) as Void {
-        Application.Storage.setValue("status", code);
-        if (code >= 200 && code < 300) {
-            Application.Storage.setValue("sentTs", _ts);
-            Application.Storage.setValue("level", _level);
-        }
-        Background.exit(null);
+        var ok = code >= 200 && code < 300;
+        Background.exit({"status" => code, "sentTs" => ok ? _ts : null, "level" => ok ? _level : null});
     }
 }

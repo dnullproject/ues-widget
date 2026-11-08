@@ -27,6 +27,18 @@ class UesBbApp extends Application.AppBase {
         return [new UesBbGlance()];
     }
 
+    function onBackgroundData(data as Application.PersistableType) as Void {
+        if (data instanceof Dictionary) {
+            var d = data as Dictionary;
+            Application.Storage.setValue("status", d["status"]);
+            if (d["sentTs"] != null) {
+                Application.Storage.setValue("sentTs", d["sentTs"]);
+                Application.Storage.setValue("level", d["level"]);
+            }
+        }
+        WatchUi.requestUpdate();
+    }
+
     function getServiceDelegate() as [ServiceDelegate] {
         return [new UesBbDelegate()];
     }

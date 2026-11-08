@@ -2,10 +2,9 @@
 <iq:manifest xmlns:iq="http://www.garmin.com/xml/connectiq" version="3">
     <iq:application entry="UesBbApp" id="0C27F4CF682D4633B858B105A26C15E3" launcherIcon="@Drawables.LauncherIcon" minApiLevel="4.0.0" name="@Strings.AppName" type="widget">
         <iq:products>
-            <!-- Fenix 8 AMOLED 43 / 47 / 51 mm and Fenix 8 Pro 47 mm -->
+            <!-- Fenix 8 AMOLED 43 / 47 mm and Fenix 8 Pro 47 mm -->
             <iq:product id="fenix843mm"/>
             <iq:product id="fenix847mm"/>
-            <iq:product id="fenix851mm"/>
             <iq:product id="fenix8pro47mm"/>
         </iq:products>
         <iq:permissions>
