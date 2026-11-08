@@ -26,10 +26,10 @@ data class Suggestion(
     val severity: String? = null,
     val context: String? = null,
     val scheduledDate: String? = null,
-    val endTime: String? = null,
     val description: String? = null,
     val steps: List<String> = emptyList(),
     val note: String? = null,
+    val endTime: String? = null,
 )
 
 data class InboxResult(val items: List<InboxItem>, val count: Int = 0)
