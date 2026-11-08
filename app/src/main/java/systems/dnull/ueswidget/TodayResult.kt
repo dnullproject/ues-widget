@@ -91,10 +91,7 @@ fun Vitals.withDailySummary(json: String): Vitals {
 
 fun Vitals.withHealth(json: String): Vitals = copy(steps = JSONObject(json).int("steps"))
 
-fun Vitals.withInbox(json: String): Vitals {
-    val o = JSONObject(json)
-    return copy(inbox = o.int("count") ?: o.optJSONArray("items")?.length())
-}
+fun Vitals.withInbox(json: String): Vitals = copy(inbox = parseInbox(json).count)
 
 /** 3.13 -> "3г08", the way the dashboard writes durations. */
 fun hoursLabel(h: Double): String {
