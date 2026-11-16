@@ -111,7 +111,7 @@ fun uploadVoiceNote(baseUrl: String, apiKey: String, file: File, durationS: Int)
         }
         res = send(n - 1)
     }
-    if (res.first != 201) error("HTTP ${res.first}")
+    if (res.first !in 200..299 || !JSONObject(res.second.ifBlank { "{}" }).optBoolean("complete")) error("HTTP ${res.first}")
 }
 
 /** POST with a JSON body; returns the HTTP status code and the response body (the error body on 4xx/5xx). */
