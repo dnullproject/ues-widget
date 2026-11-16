@@ -1,6 +1,9 @@
 package systems.dnull.ueswidget
 
 import android.content.Context
+import android.util.Base64
+import org.json.JSONObject
+import java.io.File
 import java.net.HttpURLConnection
 import java.net.URL
 import java.net.URLEncoder
@@ -66,14 +69,53 @@ fun toggleDone(baseUrl: String, apiKey: String, pageId: String, done: Boolean) {
     call(baseUrl, apiKey, "POST", "/api/today/items/$id/${if (done) "reopen" else "done"}")
 }
 
-/** POSTs an inbox action with an empty JSON body; 2xx and 409 (already handled) count as ok. */
-fun inboxAction(baseUrl: String, apiKey: String, id: Int, action: String) {
-    val code = postCode(baseUrl, apiKey, "/api/inbox/$id/$action")
+/** POSTs an inbox action (empty JSON body by default); 2xx and 409 (already handled) count as ok. */
+fun inboxAction(baseUrl: String, apiKey: String, id: Int, action: String, body: String = "{}") {
+    val code = postCode(baseUrl, apiKey, "/api/inbox/$id/$action", body).first
     if (code !in 200..299 && code != 409) error("HTTP $code")
 }
 
-/** POST with an empty JSON body; returns the HTTP status code. */
-private fun postCode(baseUrl: String, apiKey: String, path: String): Int {
+private const val CHUNK_BYTES = 48 * 1024
+
+/**
+ * Uploads a recorded OGG/Opus note in 48 KiB base64 chunks to /api/voice-notes/chunk; the server assembles it
+ * (201 on the last chunk), transcribes it and files it into the inbox. A 409 lists missing chunks: resend once.
+ */
+fun uploadVoiceNote(baseUrl: String, apiKey: String, file: File, durationS: Int) {
+    val bytes = file.readBytes()
+    if (bytes.isEmpty()) error("порожній запис")
+    val noteId = "phone-" + System.currentTimeMillis()
+    val recordedAt = (System.currentTimeMillis() / 1000).toInt() - durationS
+    val n = (bytes.size + CHUNK_BYTES - 1) / CHUNK_BYTES
+    fun send(seq: Int): Pair<Int, String> {
+        val part = bytes.copyOfRange(seq * CHUNK_BYTES, minOf(bytes.size, (seq + 1) * CHUNK_BYTES))
+        val o = JSONObject().put("note_id", noteId).put("seq", seq).put("last", seq == n - 1)
+            .put("data", Base64.encodeToString(part, Base64.NO_WRAP))
+        if (seq == 0) o.put("format", "ogg_opus").put("recorded_at", recordedAt)
+        if (seq == n - 1) o.put("duration_s", durationS).put("total_bytes", bytes.size).put("chunks", n)
+        return postCode(baseUrl, apiKey, "/api/voice-notes/chunk", o.toString())
+    }
+    var res = Pair(200, "")
+    for (seq in 0 until n) {
+        res = send(seq)
+        if (res.first == 409) break
+        if (res.first !in 200..299) error("HTTP ${res.first}")
+    }
+    if (res.first == 409) {
+        val missing = JSONObject(res.second).optJSONArray("missing")
+        for (k in 0 until (missing?.length() ?: 0)) {
+            val seq = missing!!.getInt(k)
+            if (seq !in 0 until n) error("HTTP 409")
+            val r = send(seq)
+            if (r.first !in 200..299) error("HTTP ${r.first}")
+        }
+        res = send(n - 1)
+    }
+    if (res.first != 201) error("HTTP ${res.first}")
+}
+
+/** POST with a JSON body; returns the HTTP status code and the response body (the error body on 4xx/5xx). */
+private fun postCode(baseUrl: String, apiKey: String, path: String, body: String): Pair<Int, String> {
     val conn = URL("${baseUrl.trimEnd('/')}$path").openConnection() as HttpURLConnection
     try {
         conn.requestMethod = "POST"
@@ -82,8 +124,10 @@ private fun postCode(baseUrl: String, apiKey: String, path: String): Int {
         conn.setRequestProperty("X-API-Key", apiKey)
         conn.setRequestProperty("Content-Type", "application/json")
         conn.doOutput = true
-        conn.outputStream.use { it.write("{}".toByteArray(Charsets.UTF_8)) }
-        return conn.responseCode
+        conn.outputStream.use { it.write(body.toByteArray(Charsets.UTF_8)) }
+        val code = conn.responseCode
+        val text = (if (code >= 400) conn.errorStream else conn.inputStream)?.bufferedReader()?.use { it.readText() } ?: ""
+        return code to text
     } finally {
         conn.disconnect()
     }

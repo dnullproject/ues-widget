@@ -83,3 +83,23 @@ class InboxResultTest {
         assertEquals("nope", isoDateLabel("nope"))
     }
 }
+
+class TodayReminderSlotTest {
+    private fun slot(s: String) = todayReminderSlot(java.time.LocalDateTime.parse(s))
+
+    @Test fun roundsUpToNextQuarter() {
+        val (date, at) = slot("2026-11-09T10:07:30")
+        assertEquals("2026-11-09T12:15", date)
+        assertEquals(java.time.LocalDateTime.parse("2026-11-09T12:15:00"), at)
+    }
+
+    @Test fun exactQuarterStays() = assertEquals("2026-11-09T12:00", slot("2026-11-09T10:00:00").first)
+
+    @Test fun secondsPushPastExactQuarter() = assertEquals("2026-11-09T12:15", slot("2026-11-09T10:00:01").first)
+
+    @Test fun crossingMidnightSendsDateOnly() {
+        val (date, at) = slot("2026-11-09T22:40:00")
+        assertEquals("2026-11-09", date)
+        assertEquals(java.time.LocalDateTime.parse("2026-11-10T00:45:00"), at)
+    }
+}

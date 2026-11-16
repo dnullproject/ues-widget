@@ -245,6 +245,11 @@ private fun Header(st: WidgetStyle, result: TodayResult?, bb: Int?, fetchedAt: S
         // When the data was fetched, so a stale widget is visible at a glance.
         Text(" $fetchedAt", style = TextStyle(color = st.muted, fontSize = st.sp(11)))
         Text(
+            "🎤",
+            GlanceModifier.clickable(actionStartActivity<RecordActivity>()).padding(start = 10.dp, end = 2.dp),
+            style = TextStyle(color = st.muted, fontSize = st.sp(17))
+        )
+        Text(
             "⟳",
             GlanceModifier.clickable(actionRunCallback<RefreshCallback>()).padding(start = 10.dp, end = 2.dp),
             style = TextStyle(color = st.muted, fontSize = st.sp(17))

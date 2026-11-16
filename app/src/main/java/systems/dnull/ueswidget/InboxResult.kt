@@ -123,3 +123,17 @@ fun suggestionText(item: InboxItem): String {
         s.note?.let { add("AI: $it") }
     }.joinToString("\n")
 }
+
+/**
+ * The "+2 h" reminder: now + 2 h rounded up to the next 15 min. Returns the scheduled_date to send (a timed
+ * "YYYY-MM-DDTHH:MM", or just today's date when the slot crosses midnight) and the local alarm time.
+ */
+fun todayReminderSlot(now: LocalDateTime): Pair<String, LocalDateTime> {
+    val base = now.plusHours(2)
+    val minute = base.truncatedTo(ChronoUnit.MINUTES)
+    val up = if (minute == base) minute else minute.plusMinutes(1)
+    val at = up.plusMinutes(((15 - up.minute % 15) % 15).toLong())
+    val date = if (at.toLocalDate() == now.toLocalDate()) at.format(DateTimeFormatter.ofPattern("yyyy-MM-dd'T'HH:mm"))
+    else now.toLocalDate().toString()
+    return date to at
+}

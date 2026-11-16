@@ -14,6 +14,8 @@ import android.os.Build
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
+import java.time.LocalDateTime
+import java.time.ZoneId
 
 /**
  * Heads-up notifications for freshly suggested inbox items: the owner dictates a note on his watch,
@@ -25,15 +27,16 @@ object InboxNotifier {
     const val EXTRA_ID = "item_id"
     const val EXTRA_ACTION = "item_action"
     const val EXTRA_TITLE = "item_title"
+    const val EXTRA_RAW_TITLE = "item_raw_title"
 
     // Reuses the Settings prefs file, under its own keys.
     private const val PREFS = "ues_widget"
     private const val KEY_NOTIFIED = "inbox_notified"
 
     private val ACTIONS = listOf(
+        "⏰ +2 год" to "today",
         "✓ Створити" to "convert",
-        "Someday" to "someday",
-        "🗑 Видалити" to "trash",
+        "🗑" to "trash",
     )
 
     /** Posts a notification for every fresh suggested item and remembers ids so each is notified once. */
@@ -64,22 +67,22 @@ object InboxNotifier {
     }
 
     /** Re-posts a notification whose action failed, keeping the buttons. */
-    fun postError(context: Context, id: Int, title: String, error: String) {
-        post(context, id, title, "Помилка: $error, спробуй ще")
+    fun postError(context: Context, id: Int, title: String, rawTitle: String, error: String) {
+        post(context, id, title, "Помилка: $error, спробуй ще", rawTitle)
     }
 
     private fun post(context: Context, item: InboxItem, error: String?) {
         val text = error?.let { "Помилка: $it, спробуй ще" } ?: suggestionText(item)
-        post(context, item.id, suggestionTitle(item), text)
+        post(context, item.id, suggestionTitle(item), text, item.suggestion?.title?.ifBlank { null } ?: item.rawText)
     }
 
-    private fun post(context: Context, id: Int, title: String, text: String) {
+    private fun post(context: Context, id: Int, title: String, text: String, rawTitle: String) {
         val nm = context.getSystemService(NotificationManager::class.java)
         nm.createNotificationChannel(NotificationChannel(CHANNEL, "Вхідні: AI-розбір", NotificationManager.IMPORTANCE_HIGH))
-        nm.notify(ID_BASE + id, build(context, id, title, text))
+        nm.notify(ID_BASE + id, build(context, id, title, text, rawTitle))
     }
 
-    private fun build(context: Context, id: Int, title: String, text: String): Notification {
+    private fun build(context: Context, id: Int, title: String, text: String, rawTitle: String): Notification {
         val tap = PendingIntent.getActivity(
             context,
             id,
@@ -93,17 +96,18 @@ object InboxNotifier {
             .setStyle(Notification.BigTextStyle().bigText(text))
             .setContentIntent(tap)
         ACTIONS.forEachIndexed { i, (label, action) ->
-            builder.addAction(Notification.Action.Builder(null, label, actionPending(context, id, title, action, i)).build())
+            builder.addAction(Notification.Action.Builder(null, label, actionPending(context, id, title, rawTitle, action, i)).build())
         }
         return builder.build()
     }
 
-    private fun actionPending(context: Context, id: Int, title: String, action: String, index: Int): PendingIntent {
+    private fun actionPending(context: Context, id: Int, title: String, rawTitle: String, action: String, index: Int): PendingIntent {
         val intent = Intent(context, InboxActionReceiver::class.java)
         intent.action = "systems.dnull.ueswidget.INBOX_ACTION"
         intent.putExtra(EXTRA_ID, id)
         intent.putExtra(EXTRA_ACTION, action)
         intent.putExtra(EXTRA_TITLE, title)
+        intent.putExtra(EXTRA_RAW_TITLE, rawTitle)
         return PendingIntent.getBroadcast(
             context,
             id * 10 + index,
@@ -119,12 +123,19 @@ class InboxActionReceiver : BroadcastReceiver() {
         val id = intent.getIntExtra(InboxNotifier.EXTRA_ID, -1)
         val action = intent.getStringExtra(InboxNotifier.EXTRA_ACTION) ?: return
         val title = intent.getStringExtra(InboxNotifier.EXTRA_TITLE) ?: ""
+        val rawTitle = intent.getStringExtra(InboxNotifier.EXTRA_RAW_TITLE) ?: title
         if (id < 0) return
         val pending = goAsync()
         CoroutineScope(Dispatchers.IO).launch {
             try {
                 val err = try {
-                    inboxAction(Settings.baseUrl(context), Settings.apiKey(context), id, action)
+                    if (action == "today") {
+                        val (date, at) = todayReminderSlot(LocalDateTime.now())
+                        inboxAction(Settings.baseUrl(context), Settings.apiKey(context), id, "convert", """{"scheduled_date":"$date"}""")
+                        ReminderReceiver.schedule(context, id, rawTitle, at.atZone(ZoneId.systemDefault()).toInstant().toEpochMilli())
+                    } else {
+                        inboxAction(Settings.baseUrl(context), Settings.apiKey(context), id, action)
+                    }
                     null
                 } catch (e: Exception) {
                     e.message ?: e.javaClass.simpleName
@@ -133,7 +144,7 @@ class InboxActionReceiver : BroadcastReceiver() {
                     InboxNotifier.cancel(context, id)
                     refreshAll(context) // the inbox count changed
                 } else {
-                    InboxNotifier.postError(context, id, title, err)
+                    InboxNotifier.postError(context, id, title, rawTitle, err)
                 }
             } finally {
                 pending.finish()
