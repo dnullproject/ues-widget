@@ -46,6 +46,7 @@ class RecordActivity : Activity() {
             finish()
             return
         }
+        setFinishOnTouchOutside(false) // a stray tap must not drop the recording
         val pad = (16 * resources.displayMetrics.density).toInt()
         label = TextView(this).apply { textSize = 20f; gravity = Gravity.CENTER; setPadding(pad, pad, pad, pad) }
         send = Button(this).apply { text = "Відправити"; textSize = 20f; setOnClickListener { sendNote() } }
@@ -72,8 +73,9 @@ class RecordActivity : Activity() {
     @SuppressLint("NewApi") // onCreate bails out below API 29
     private fun startRecording() {
         val out = File(cacheDir, "note-${System.currentTimeMillis()}.ogg")
+        var r: MediaRecorder? = null
         try {
-            val r = if (Build.VERSION.SDK_INT >= 31) MediaRecorder(this) else @Suppress("DEPRECATION") MediaRecorder()
+            r = if (Build.VERSION.SDK_INT >= 31) MediaRecorder(this) else @Suppress("DEPRECATION") MediaRecorder()
             r.setAudioSource(MediaRecorder.AudioSource.MIC)
             r.setOutputFormat(MediaRecorder.OutputFormat.OGG)
             r.setAudioEncoder(MediaRecorder.AudioEncoder.OPUS)
@@ -89,6 +91,7 @@ class RecordActivity : Activity() {
             r.start()
             recorder = r
         } catch (e: Exception) {
+            r?.release()
             out.delete()
             Toast.makeText(this, "Помилка: ${e.message ?: e.javaClass.simpleName}", Toast.LENGTH_LONG).show()
             finish()
