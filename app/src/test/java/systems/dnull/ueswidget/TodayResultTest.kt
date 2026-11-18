@@ -5,6 +5,7 @@ import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
+import java.time.LocalTime
 import java.time.ZoneId
 
 class TodayResultTest {
@@ -64,5 +65,30 @@ class TodayResultTest {
             .withBodyBattery("""{"available":false,"level":null}""")
             .withDailySummary("""{"body":{"sleep_score":null,"sleep_duration_h":null},"habits":{"done":0,"skipped":0,"missed":0}}""")
         assertEquals(Vitals(), v)
+    }
+
+    @Test fun scheduledDateFallback() {
+        val r = parseToday(
+            """{"plan":{"day":"2026-10-29","status":"active","items":[
+              {"page_id":"1","title":"WithTime","status":"planned","start_time":null,"scheduled_date":"2026-10-29T12:00:00+00:00"},
+              {"page_id":"2","title":"DateOnly","status":"planned","start_time":null,"scheduled_date":"2026-10-29"}]}}""",
+            kyiv,
+        )
+        assertEquals(listOf("14:00", null), r.items.map { it.startTime })
+    }
+
+    @Test fun nextTimedTaskPickingAndFormatting() {
+        val items = listOf(
+            TodayItem("1", "DoneSoon", "done", "14:10"),
+            TodayItem("2", "Past", "planned", "13:59"),
+            TodayItem("3", "NoTime", "running", null),
+            TodayItem("4", "Later", "planned", "16:00"),
+            TodayItem("5", "Soon", "running", "14:25"),
+        )
+        assertEquals("⏰ 14:25 Soon · через 25 хв", formatNextTimedTask(items, LocalTime.of(14, 0)))
+        assertEquals("⏰ 14:25 Soon · через 0 хв", formatNextTimedTask(items, LocalTime.of(14, 25)))
+        assertEquals("⏰ 16:00 Later · через 60 хв", formatNextTimedTask(items, LocalTime.of(15, 0)))
+        assertEquals("⏰ 16:00 Later", formatNextTimedTask(items, LocalTime.of(14, 26)))
+        assertNull(formatNextTimedTask(items, LocalTime.of(16, 1)))
     }
 }
