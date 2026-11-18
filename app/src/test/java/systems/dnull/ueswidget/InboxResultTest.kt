@@ -18,6 +18,11 @@ class InboxResultTest {
         ],"count":3}""".trimIndent()
 
     @Test fun parse() {
+        assertEquals(
+            """{"items":[{"id":1,"raw_text":"x","source":"w","status":"new","created_at":"2026-11-08T10:00:00+00:00",
+              "suggestion":{"title":"T","kind":"reference","tag":"Тату"}}]}""".let { parseInbox(it).items.single().suggestion?.tag },
+            "Тату",
+        )
         val r = parseInbox(json)
         assertEquals(3, r.count)
         assertEquals(3, r.items.size)
@@ -42,6 +47,11 @@ class InboxResultTest {
     }
 
     @Test fun countFallsBackToItems() {
+        assertEquals(
+            """{"items":[{"id":1,"raw_text":"x","source":"w","status":"new","created_at":"2026-11-08T10:00:00+00:00",
+              "suggestion":{"title":"T","kind":"reference","tag":"Тату"}}]}""".let { parseInbox(it).items.single().suggestion?.tag },
+            "Тату",
+        )
         val r = parseInbox(
             """{"items":[{"id":1,"raw_text":"x","source":"w","status":"new","created_at":"2026-11-08T10:00:00+00:00",
               "suggestion":{"title":"T","kind":"action"}}]}""".trimIndent(),
@@ -51,8 +61,13 @@ class InboxResultTest {
 
     @Test fun fresh() {
         val now = Instant.parse("2026-11-08T12:00:00Z")
-        fun item(id: Int, status: String = "new", created: String = "2026-11-08T11:00:00+00:00", suggested: Boolean = true) =
-            InboxItem(id, "r", "watch", status, created, if (suggested) Suggestion("T$id", "action") else null)
+        fun item(
+            id: Int,
+            status: String = "new",
+            created: String = "2026-11-08T11:00:00+00:00",
+            suggested: Boolean = true,
+            kind: String = "action",
+        ) = InboxItem(id, "r", "watch", status, created, if (suggested) Suggestion("T$id", kind) else null)
 
         val items = listOf(
             item(1), // fresh -> notify
@@ -62,8 +77,10 @@ class InboxResultTest {
             item(5), // notified before
             item(6, created = "garbage"), // unparseable date
             item(7, created = "2026-11-08T13:00:00+00:00"), // future date
+            item(8, kind = "reference"), // reference waits silently for the dashboard
+            item(9, kind = "two_minute"), // fresh two-minute -> notify
         )
-        assertEquals(listOf(1), freshSuggestions(items, setOf(5), now).map { it.id })
+        assertEquals(listOf(1, 9), freshSuggestions(items, setOf(5), now).map { it.id })
     }
 
     @Test fun titleAndText() {
@@ -72,6 +89,7 @@ class InboxResultTest {
         assertEquals("Задача: Buy milk", suggestionTitle(item))
         assertEquals("09.11 · 3 SP · Med · home\nAt the store\nAI: soon", suggestionText(item))
         assertEquals("Нотатка? Buy milk", suggestionTitle(item.copy(suggestion = s.copy(kind = "reference"))))
+        assertEquals("Нотатка? [Тату] Buy milk", suggestionTitle(item.copy(suggestion = s.copy(kind = "reference", tag = "Тату"))))
 
         val bare = item.copy(rawText = "raw note", suggestion = Suggestion("X", "two_minute"))
         assertEquals("Задача: X", suggestionTitle(bare))
@@ -93,6 +111,11 @@ class InboxResultTest {
                  {"title":"Call mom","sp":2,"severity":null,"context":null,"scheduled_date":null,"start_time":null}
                ]}}
             ]}""".trimIndent()
+        assertEquals(
+            """{"items":[{"id":1,"raw_text":"x","source":"w","status":"new","created_at":"2026-11-08T10:00:00+00:00",
+              "suggestion":{"title":"T","kind":"reference","tag":"Тату"}}]}""".let { parseInbox(it).items.single().suggestion?.tag },
+            "Тату",
+        )
         val r = parseInbox(multiJson)
         val s = r.items.single().suggestion!!
         assertEquals("multi", s.kind)
@@ -124,6 +147,10 @@ class InboxResultTest {
         assertEquals(
             listOf("📌 Зберегти" to "reference", "✓ Таска" to "convert", "🗑" to "trash"),
             suggestionActions(base.copy(suggestion = Suggestion("T", "reference"))),
+        )
+        assertEquals(
+            listOf("✓ Зроблено" to "done", "✓ Створити" to "convert", "🗑" to "trash"),
+            suggestionActions(base.copy(suggestion = Suggestion("T", "two_minute"))),
         )
         val two = listOf(SuggestionItem("A"), SuggestionItem("B"))
         assertEquals(

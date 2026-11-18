@@ -41,6 +41,7 @@ data class Suggestion(
     val steps: List<String> = emptyList(),
     val note: String? = null,
     val endTime: String? = null,
+    val tag: String? = null,
     val items: List<SuggestionItem> = emptyList(),
 )
 
@@ -73,6 +74,7 @@ fun parseInbox(json: String): InboxResult {
                         (0 until steps.length()).map { steps.optString(it) }
                     } ?: emptyList(),
                     note = s.str("note"),
+                    tag = s.str("tag"),
                     items = s.optJSONArray("items")?.let { subArr ->
                         (0 until subArr.length()).mapNotNull { idx ->
                             subArr.optJSONObject(idx)?.let { sub ->
@@ -94,11 +96,11 @@ fun parseInbox(json: String): InboxResult {
     return InboxResult(items, root.int("count") ?: items.size)
 }
 
-/** Items to notify about: new, with a suggestion, created within the last 24 h and not notified yet. */
+/** Items to notify about: new, with a non-reference suggestion, created within the last 24 h and not notified yet. */
 fun freshSuggestions(items: List<InboxItem>, notified: Set<Int>, now: Instant = Instant.now()): List<InboxItem> {
     val cutoff = now.minus(24, ChronoUnit.HOURS)
     return items.filter { item ->
-        item.status == "new" && item.suggestion != null && item.id !in notified &&
+        item.status == "new" && item.suggestion != null && item.suggestion.kind != "reference" && item.id !in notified &&
             item.createdAt?.let { created ->
                 runCatching { OffsetDateTime.parse(created).toInstant() }.getOrNull()
                     ?.let { !it.isBefore(cutoff) && !it.isAfter(now) } ?: false
@@ -121,12 +123,12 @@ fun isoDateLabel(date: String, endTime: String? = null): String =
         date
     }
 
-/** "Задача: X", "Нотатка? X" for reference material, or "Задачі (N): X" for multi-task captures. */
+/** "Задача: X", "Нотатка? [tag] X" (or "Нотатка? X") for reference material, or "Задачі (N): X" for multi-task captures. */
 fun suggestionTitle(item: InboxItem): String {
     val s = item.suggestion ?: return item.rawText
     val t = s.title.ifBlank { item.rawText }
     return when {
-        s.kind == "reference" -> "Нотатка? $t"
+        s.kind == "reference" -> if (!s.tag.isNullOrBlank()) "Нотатка? [${s.tag}] $t" else "Нотатка? $t"
         s.kind == "multi" && s.items.size >= 2 -> "Задачі (${s.items.size}): $t"
         else -> "Задача: $t"
     }
@@ -170,6 +172,11 @@ fun suggestionActions(item: InboxItem): List<Pair<String, String>> {
         s?.kind == "reference" -> listOf(
             "📌 Зберегти" to "reference",
             "✓ Таска" to "convert",
+            "🗑" to "trash",
+        )
+        s?.kind == "two_minute" -> listOf(
+            "✓ Зроблено" to "done",
+            "✓ Створити" to "convert",
             "🗑" to "trash",
         )
         s?.kind == "multi" && s.items.size >= 2 -> listOf(
