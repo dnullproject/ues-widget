@@ -1,5 +1,6 @@
 package systems.dnull.ueswidget
 
+import org.json.JSONObject
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNull
 import org.junit.Test
@@ -81,6 +82,89 @@ class InboxResultTest {
         assertEquals("09.11 09:00–10:00", isoDateLabel("2026-11-09T09:00"))
         assertEquals("09.11 14:00–16:00", isoDateLabel("2026-11-09T14:00", "16:00"))
         assertEquals("nope", isoDateLabel("nope"))
+    }
+
+    @Test fun parseMultiItems() {
+        val multiJson = """
+            {"items":[
+              {"id":10,"raw_text":"buy milk and call mom","source":"watch","status":"new","created_at":"2026-11-08T10:00:00+00:00",
+               "suggestion":{"title":"Errands","kind":"multi","items":[
+                 {"title":"Buy milk","sp":1,"severity":"Low","context":"home","scheduled_date":"2026-11-09","start_time":"14:00"},
+                 {"title":"Call mom","sp":2,"severity":null,"context":null,"scheduled_date":null,"start_time":null}
+               ]}}
+            ]}""".trimIndent()
+        val r = parseInbox(multiJson)
+        val s = r.items.single().suggestion!!
+        assertEquals("multi", s.kind)
+        assertEquals(2, s.items.size)
+        assertEquals(SuggestionItem("Buy milk", 1, "Low", "home", "2026-11-09", "14:00"), s.items[0])
+        assertEquals(SuggestionItem("Call mom", 2, null, null, null, null), s.items[1])
+    }
+
+    @Test fun multiTitleAndText() {
+        val items = listOf(
+            SuggestionItem("Buy milk", 1, scheduledDate = "2026-11-09", startTime = "14:00"),
+            SuggestionItem("Pay bills", 2, scheduledDate = "2026-11-10"),
+            SuggestionItem("Call mom", 1),
+        )
+        val item = InboxItem(1, "raw", "watch", "new", "2026-11-08T10:00:00+00:00", Suggestion("Errands", "multi", items = items))
+        assertEquals("Задачі (3): Errands", suggestionTitle(item))
+        assertEquals(
+            "• Buy milk — 09.11 14:00\n• Pay bills — 10.11\n• Call mom",
+            suggestionText(item),
+        )
+    }
+
+    @Test fun actionsPerKind() {
+        val base = InboxItem(1, "raw", "watch", "new", "2026-11-08T10:00:00+00:00", Suggestion("T", "action"))
+        assertEquals(
+            listOf("⏰ +2 год" to "today", "✓ Створити" to "convert", "🗑" to "trash"),
+            suggestionActions(base),
+        )
+        assertEquals(
+            listOf("📌 Зберегти" to "reference", "✓ Таска" to "convert", "🗑" to "trash"),
+            suggestionActions(base.copy(suggestion = Suggestion("T", "reference"))),
+        )
+        val two = listOf(SuggestionItem("A"), SuggestionItem("B"))
+        assertEquals(
+            listOf("✓ Створити 2" to "split", "🗑" to "trash"),
+            suggestionActions(base.copy(suggestion = Suggestion("T", "multi", items = two))),
+        )
+        assertEquals(
+            listOf("⏰ +2 год" to "today", "✓ Створити" to "convert", "🗑" to "trash"),
+            suggestionActions(base.copy(suggestion = Suggestion("T", "multi", items = listOf(SuggestionItem("A"))))),
+        )
+    }
+
+    @Test fun splitBodyJsonFormat() {
+        val jsonStr = splitBodyJson(
+            listOf(
+                SuggestionItem("Buy milk", 1, "Low", "home", "2026-11-09", "14:00"),
+                SuggestionItem("Call mom", 2),
+            ),
+        )
+        val root = JSONObject(jsonStr)
+        val arr = root.getJSONArray("items")
+        assertEquals(2, arr.length())
+        val first = arr.getJSONObject(0)
+        assertEquals("Buy milk", first.getString("title"))
+        assertEquals(1, first.getInt("sp"))
+        assertEquals("Low", first.getString("severity"))
+        assertEquals("home", first.getString("context"))
+        assertEquals("2026-11-09", first.getString("scheduled_date"))
+        assertEquals("14:00", first.getString("start_time"))
+        val second = arr.getJSONObject(1)
+        assertEquals("Call mom", second.getString("title"))
+        assertEquals(2, second.getInt("sp"))
+        assertEquals(true, second.isNull("severity"))
+        assertEquals(true, second.isNull("scheduled_date"))
+        assertEquals(true, second.isNull("start_time"))
+    }
+
+    @Test fun splitBodyDropsUndatedStartTimeAndZeroSp() {
+        val item = JSONObject(splitBodyJson(listOf(SuggestionItem("Call", 0, startTime = "10:00")))).getJSONArray("items").getJSONObject(0)
+        assertEquals(false, item.has("sp"))
+        assertEquals(true, item.isNull("start_time"))
     }
 }
 

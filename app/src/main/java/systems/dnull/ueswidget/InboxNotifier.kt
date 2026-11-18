@@ -28,12 +28,14 @@ object InboxNotifier {
     const val EXTRA_ACTION = "item_action"
     const val EXTRA_TITLE = "item_title"
     const val EXTRA_RAW_TITLE = "item_raw_title"
+    const val EXTRA_SPLIT_BODY = "item_split_body"
+    const val EXTRA_ACTIONS = "item_actions"
 
     // Reuses the Settings prefs file, under its own keys.
     private const val PREFS = "ues_widget"
     private const val KEY_NOTIFIED = "inbox_notified"
 
-    private val ACTIONS = listOf(
+    val DEFAULT_ACTIONS = listOf(
         "⏰ +2 год" to "today",
         "✓ Створити" to "convert",
         "🗑" to "trash",
@@ -67,22 +69,48 @@ object InboxNotifier {
     }
 
     /** Re-posts a notification whose action failed, keeping the buttons. */
-    fun postError(context: Context, id: Int, title: String, rawTitle: String, error: String) {
-        post(context, id, title, "Помилка: $error, спробуй ще", rawTitle)
+    fun postError(context: Context, id: Int, title: String, rawTitle: String, error: String, actions: List<Pair<String, String>>, splitBody: String?) {
+        post(context, id, title, "Помилка: $error, спробуй ще", rawTitle, actions, splitBody)
     }
 
     private fun post(context: Context, item: InboxItem, error: String?) {
         val text = error?.let { "Помилка: $it, спробуй ще" } ?: suggestionText(item)
-        post(context, item.id, suggestionTitle(item), text, item.suggestion?.title?.ifBlank { null } ?: item.rawText)
+        val splitBody = item.suggestion?.takeIf { it.kind == "multi" && it.items.size >= 2 }
+            ?.let { splitBodyJson(it.items) }
+        post(
+            context,
+            item.id,
+            suggestionTitle(item),
+            text,
+            item.suggestion?.title?.ifBlank { null } ?: item.rawText,
+            suggestionActions(item),
+            splitBody,
+        )
     }
 
-    private fun post(context: Context, id: Int, title: String, text: String, rawTitle: String) {
+    private fun post(
+        context: Context,
+        id: Int,
+        title: String,
+        text: String,
+        rawTitle: String,
+        actions: List<Pair<String, String>>,
+        splitBody: String? = null,
+    ) {
         val nm = context.getSystemService(NotificationManager::class.java)
         nm.createNotificationChannel(NotificationChannel(CHANNEL, "Вхідні: AI-розбір", NotificationManager.IMPORTANCE_HIGH))
-        nm.notify(ID_BASE + id, build(context, id, title, text, rawTitle))
+        nm.notify(ID_BASE + id, build(context, id, title, text, rawTitle, actions, splitBody))
     }
 
-    private fun build(context: Context, id: Int, title: String, text: String, rawTitle: String): Notification {
+    private fun build(
+        context: Context,
+        id: Int,
+        title: String,
+        text: String,
+        rawTitle: String,
+        actions: List<Pair<String, String>>,
+        splitBody: String?,
+    ): Notification {
         val tap = PendingIntent.getActivity(
             context,
             id,
@@ -95,19 +123,37 @@ object InboxNotifier {
             .setContentText(text)
             .setStyle(Notification.BigTextStyle().bigText(text))
             .setContentIntent(tap)
-        ACTIONS.forEachIndexed { i, (label, action) ->
-            builder.addAction(Notification.Action.Builder(null, label, actionPending(context, id, title, rawTitle, action, i)).build())
+        val encoded = ArrayList(actions.map { (label, action) -> "$action\t$label" })
+        actions.forEachIndexed { i, (label, action) ->
+            builder.addAction(
+                Notification.Action.Builder(
+                    null,
+                    label,
+                    actionPending(context, id, title, rawTitle, action, i, splitBody, encoded),
+                ).build(),
+            )
         }
         return builder.build()
     }
 
-    private fun actionPending(context: Context, id: Int, title: String, rawTitle: String, action: String, index: Int): PendingIntent {
+    private fun actionPending(
+        context: Context,
+        id: Int,
+        title: String,
+        rawTitle: String,
+        action: String,
+        index: Int,
+        splitBody: String?,
+        actions: ArrayList<String>,
+    ): PendingIntent {
         val intent = Intent(context, InboxActionReceiver::class.java)
         intent.action = "systems.dnull.ueswidget.INBOX_ACTION"
         intent.putExtra(EXTRA_ID, id)
         intent.putExtra(EXTRA_ACTION, action)
         intent.putExtra(EXTRA_TITLE, title)
         intent.putExtra(EXTRA_RAW_TITLE, rawTitle)
+        if (splitBody != null) intent.putExtra(EXTRA_SPLIT_BODY, splitBody)
+        intent.putStringArrayListExtra(EXTRA_ACTIONS, actions) // so a failed action re-posts the same buttons
         return PendingIntent.getBroadcast(
             context,
             id * 10 + index,
@@ -124,17 +170,28 @@ class InboxActionReceiver : BroadcastReceiver() {
         val action = intent.getStringExtra(InboxNotifier.EXTRA_ACTION) ?: return
         val title = intent.getStringExtra(InboxNotifier.EXTRA_TITLE) ?: ""
         val rawTitle = intent.getStringExtra(InboxNotifier.EXTRA_RAW_TITLE) ?: title
+        val splitBody = intent.getStringExtra(InboxNotifier.EXTRA_SPLIT_BODY)
+        val actions = intent.getStringArrayListExtra(InboxNotifier.EXTRA_ACTIONS)
+            ?.map { it.substringAfter('\t') to it.substringBefore('\t') } ?: InboxNotifier.DEFAULT_ACTIONS
         if (id < 0) return
         val pending = goAsync()
         CoroutineScope(Dispatchers.IO).launch {
             try {
                 val err = try {
-                    if (action == "today") {
-                        val (date, at) = todayReminderSlot(LocalDateTime.now())
-                        inboxAction(Settings.baseUrl(context), Settings.apiKey(context), id, "convert", """{"scheduled_date":"$date"}""")
-                        ReminderReceiver.schedule(context, id, rawTitle, at.atZone(ZoneId.systemDefault()).toInstant().toEpochMilli())
-                    } else {
-                        inboxAction(Settings.baseUrl(context), Settings.apiKey(context), id, action)
+                    when (action) {
+                        "today" -> {
+                            val (date, at) = todayReminderSlot(LocalDateTime.now())
+                            inboxAction(Settings.baseUrl(context), Settings.apiKey(context), id, "convert", """{"scheduled_date":"$date"}""")
+                            ReminderReceiver.schedule(context, id, rawTitle, at.atZone(ZoneId.systemDefault()).toInstant().toEpochMilli())
+                        }
+                        "split" -> inboxAction(
+                            Settings.baseUrl(context),
+                            Settings.apiKey(context),
+                            id,
+                            "split",
+                            splitBody ?: """{"items":[]}""",
+                        )
+                        else -> inboxAction(Settings.baseUrl(context), Settings.apiKey(context), id, action)
                     }
                     null
                 } catch (e: Exception) {
@@ -144,7 +201,7 @@ class InboxActionReceiver : BroadcastReceiver() {
                     InboxNotifier.cancel(context, id)
                     refreshAll(context) // the inbox count changed
                 } else {
-                    InboxNotifier.postError(context, id, title, rawTitle, err)
+                    InboxNotifier.postError(context, id, title, rawTitle, err, actions, splitBody)
                 }
             } finally {
                 pending.finish()
