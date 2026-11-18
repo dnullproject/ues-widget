@@ -191,11 +191,12 @@ fun splitBodyJson(items: List<SuggestionItem>): String {
         arr.put(
             JSONObject().apply {
                 put("title", it.title)
-                put("sp", it.sp)
+                if (it.sp > 0) put("sp", it.sp) // absent: the server defaults to 1
                 put("severity", it.severity ?: JSONObject.NULL)
                 put("context", it.context ?: JSONObject.NULL)
                 put("scheduled_date", it.scheduledDate ?: JSONObject.NULL)
-                put("start_time", it.startTime ?: JSONObject.NULL)
+                // the server rejects a start_time without a date, which would fail the whole split
+                put("start_time", it.startTime?.takeIf { _ -> it.scheduledDate != null } ?: JSONObject.NULL)
             },
         )
     }

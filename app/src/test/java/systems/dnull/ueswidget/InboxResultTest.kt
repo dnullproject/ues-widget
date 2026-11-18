@@ -160,6 +160,12 @@ class InboxResultTest {
         assertEquals(true, second.isNull("scheduled_date"))
         assertEquals(true, second.isNull("start_time"))
     }
+
+    @Test fun splitBodyDropsUndatedStartTimeAndZeroSp() {
+        val item = JSONObject(splitBodyJson(listOf(SuggestionItem("Call", 0, startTime = "10:00")))).getJSONArray("items").getJSONObject(0)
+        assertEquals(false, item.has("sp"))
+        assertEquals(true, item.isNull("start_time"))
+    }
 }
 
 class TodayReminderSlotTest {
