@@ -1,8 +1,10 @@
 package systems.dnull.ueswidget
 
 import org.json.JSONObject
+import java.time.LocalTime
 import java.time.OffsetDateTime
 import java.time.ZoneId
+import java.time.temporal.ChronoUnit
 
 data class TodayItem(
     val pageId: String,
@@ -46,7 +48,8 @@ fun parseToday(json: String, zone: ZoneId = ZoneId.systemDefault()): TodayResult
     val items = (0 until (arr?.length() ?: 0)).map { arr!!.getJSONObject(it) }.mapNotNull { o ->
         val status = o.optString("status")
         if (status !in SHOWN) return@mapNotNull null
-        TodayItem(o.optString("page_id"), o.optString("title"), status, o.str("start_time"), o.int("sp") ?: 0)
+        val startTime = o.str("start_time") ?: o.str("scheduled_date")?.takeIf { 'T' in it }?.let { localHm(it, zone) }
+        TodayItem(o.optString("page_id"), o.optString("title"), status, startTime, o.int("sp") ?: 0)
     }
     val next = root.optJSONObject("next_event")?.let { e ->
         e.str("start")?.let { NextEvent(localHm(it, zone), e.optString("title")) }
@@ -100,3 +103,24 @@ fun hoursLabel(h: Double): String {
 }
 
 fun stepsLabel(n: Int): String = if (n < 1000) "$n" else "%.1fk".format(java.util.Locale.ROOT, n / 1000.0)
+
+private fun parseHm(s: String?): LocalTime? =
+    if (s == null || s.length < 5) null
+    else try { LocalTime.parse(s.take(5)) } catch (_: Exception) { null }
+
+/** Picks the earliest not-done item whose scheduled time is >= [now]. */
+fun nextTimedTask(items: List<TodayItem>, now: LocalTime = LocalTime.now()): Pair<TodayItem, LocalTime>? =
+    items
+        .asSequence()
+        .filter { it.status != "done" }
+        .mapNotNull { item -> parseHm(item.startTime)?.let { item to it } }
+        .filter { (_, time) -> !time.isBefore(now) }
+        .minByOrNull { (_, time) -> time }
+
+/** Formats the next timed task line for the widget, or null when there is none. */
+fun formatNextTimedTask(items: List<TodayItem>, now: LocalTime = LocalTime.now()): String? {
+    val (item, time) = nextTimedTask(items, now) ?: return null
+    val hm = time.toString().take(5)
+    val mins = ChronoUnit.MINUTES.between(now, time)
+    return if (mins in 0..60) "⏰ $hm ${item.title} · через $mins хв" else "⏰ $hm ${item.title}"
+}

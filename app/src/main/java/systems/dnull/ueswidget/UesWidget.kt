@@ -200,6 +200,7 @@ private fun Content(snap: Snapshot) {
     Column(GlanceModifier.fillMaxSize().background(st.bg).cornerRadius(st.corner.dp).padding(12.dp)) {
         Header(st, result, vitals.bb ?: result?.bbLevel, snap.fetchedAt, open)
         if (snap.actionError != null) Text(snap.actionError, style = TextStyle(color = RED, fontSize = st.sp(12)))
+        NextTimedTask(st, result, open)
         if (st.showStatus) Status(st, result)
         val msg = when {
             result == null -> "Налаштуй у застосунку"
@@ -256,6 +257,19 @@ private fun Header(st: WidgetStyle, result: TodayResult?, bb: Int?, fetchedAt: S
             style = TextStyle(color = st.muted, fontSize = st.sp(17))
         )
     }
+}
+
+/** One line at the top for the next upcoming timed task today. */
+@Composable
+private fun NextTimedTask(st: WidgetStyle, result: TodayResult?, open: Action) {
+    if (result == null || result.error != null) return
+    val line = formatNextTimedTask(result.items) ?: return
+    Text(
+        line,
+        GlanceModifier.fillMaxWidth().padding(top = 2.dp, bottom = 2.dp).clickable(open),
+        style = TextStyle(color = YELLOW, fontSize = st.sp(13)),
+        maxLines = 1
+    )
 }
 
 /** One line under the header: the day is won, or what is next on the calendar. */
