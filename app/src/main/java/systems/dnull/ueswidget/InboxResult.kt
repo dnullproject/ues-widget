@@ -1,5 +1,6 @@
 package systems.dnull.ueswidget
 
+import org.json.JSONArray
 import org.json.JSONObject
 import java.time.Instant
 import java.time.LocalDate
@@ -18,6 +19,16 @@ data class InboxItem(
     val suggestion: Suggestion? = null,
 )
 
+/** One sub-task in a "multi" inbox suggestion. */
+data class SuggestionItem(
+    val title: String,
+    val sp: Int = 0,
+    val severity: String? = null,
+    val context: String? = null,
+    val scheduledDate: String? = null,
+    val startTime: String? = null,
+)
+
 /** The AI triage attached to an inbox item. Every field is optional: the server adds them incrementally. */
 data class Suggestion(
     val title: String,
@@ -30,6 +41,7 @@ data class Suggestion(
     val steps: List<String> = emptyList(),
     val note: String? = null,
     val endTime: String? = null,
+    val items: List<SuggestionItem> = emptyList(),
 )
 
 data class InboxResult(val items: List<InboxItem>, val count: Int = 0)
@@ -61,6 +73,20 @@ fun parseInbox(json: String): InboxResult {
                         (0 until steps.length()).map { steps.optString(it) }
                     } ?: emptyList(),
                     note = s.str("note"),
+                    items = s.optJSONArray("items")?.let { subArr ->
+                        (0 until subArr.length()).mapNotNull { idx ->
+                            subArr.optJSONObject(idx)?.let { sub ->
+                                SuggestionItem(
+                                    title = sub.optString("title"),
+                                    sp = sub.int("sp") ?: 0,
+                                    severity = sub.str("severity"),
+                                    context = sub.str("context"),
+                                    scheduledDate = sub.str("scheduled_date"),
+                                    startTime = sub.str("start_time"),
+                                )
+                            }
+                        }
+                    } ?: emptyList(),
                 )
             },
         )
@@ -95,11 +121,15 @@ fun isoDateLabel(date: String, endTime: String? = null): String =
         date
     }
 
-/** "Задача: X", or "Нотатка? X" for reference material. */
+/** "Задача: X", "Нотатка? X" for reference material, or "Задачі (N): X" for multi-task captures. */
 fun suggestionTitle(item: InboxItem): String {
     val s = item.suggestion ?: return item.rawText
     val t = s.title.ifBlank { item.rawText }
-    return if (s.kind == "reference") "Нотатка? $t" else "Задача: $t"
+    return when {
+        s.kind == "reference" -> "Нотатка? $t"
+        s.kind == "multi" && s.items.size >= 2 -> "Задачі (${s.items.size}): $t"
+        else -> "Задача: $t"
+    }
 }
 
 /** First line of the notification: date · SP · severity · context. */
@@ -113,15 +143,63 @@ fun suggestionMeta(item: InboxItem): String {
     }.joinToString(" · ")
 }
 
-/** The notification body: meta line, then the description (or the raw note), then the AI note. */
+/** The notification body: multi-item bullet list, or meta line + description/raw + AI note. */
 fun suggestionText(item: InboxItem): String {
     val s = item.suggestion ?: return item.rawText
+    if (s.kind == "multi" && s.items.size >= 2) {
+        return s.items.joinToString("\n") { sub ->
+            val whenLabel = sub.scheduledDate?.let { d ->
+                val base = isoDateLabel(d)
+                if (sub.startTime != null) "$base ${sub.startTime}" else base
+            }
+            if (whenLabel != null) "• ${sub.title} — $whenLabel" else "• ${sub.title}"
+        }
+    }
     val body = s.description ?: item.rawText.ifBlank { null }
     return buildList {
         add(suggestionMeta(item))
         body?.let { add(it) }
         s.note?.let { add("AI: $it") }
     }.joinToString("\n")
+}
+
+/** Notification action buttons (label to action key) for an inbox item. */
+fun suggestionActions(item: InboxItem): List<Pair<String, String>> {
+    val s = item.suggestion
+    return when {
+        s?.kind == "reference" -> listOf(
+            "📌 Зберегти" to "reference",
+            "✓ Таска" to "convert",
+            "🗑" to "trash",
+        )
+        s?.kind == "multi" && s.items.size >= 2 -> listOf(
+            "✓ Створити ${s.items.size}" to "split",
+            "🗑" to "trash",
+        )
+        else -> listOf(
+            "⏰ +2 год" to "today",
+            "✓ Створити" to "convert",
+            "🗑" to "trash",
+        )
+    }
+}
+
+/** Builds the JSON body for POST /api/inbox/{id}/split. */
+fun splitBodyJson(items: List<SuggestionItem>): String {
+    val arr = JSONArray()
+    for (it in items) {
+        arr.put(
+            JSONObject().apply {
+                put("title", it.title)
+                put("sp", it.sp)
+                put("severity", it.severity ?: JSONObject.NULL)
+                put("context", it.context ?: JSONObject.NULL)
+                put("scheduled_date", it.scheduledDate ?: JSONObject.NULL)
+                put("start_time", it.startTime ?: JSONObject.NULL)
+            },
+        )
+    }
+    return JSONObject().put("items", arr).toString()
 }
 
 /**
