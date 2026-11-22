@@ -16,7 +16,7 @@ permissions AudioInput, Background, Communications, SensorHistory.
 | Page | START | Other keys |
 |------|-------|------------|
 | Record | idle: start recording (nothing records on open); recording: stop and queue | BACK while recording: stop and queue (audio is never dropped); BACK otherwise leaves the app |
-| Queue (unsent count, bytes sent/total of the oldest note, last reply code, last drop reason) | retry now | MENU (long-press UP): delete first / delete all, each with a confirmation |
+| Queue (unsent count, bytes sent/total of the oldest note, last reply code, last hold reason; "Черга n · відкладено h") | retry now | MENU (long-press UP): delete first / delete all, each with a confirmation |
 | Status (version, phone connected, last BB send time + level + HTTP code, last complete note time, alarm count + next, last alarm fetch time + code) | nothing | |
 
 Playback of recordings is not possible (Connect IQ cannot play captured audio).
@@ -59,6 +59,20 @@ Recording auto-stops after 3 minutes. Screen is pure black (AMOLED): a pulsing r
 for sync progress, a green check when done. A note that fails to upload stays in `Application.Storage` and is retried by
 the background event every 5 minutes, on START in the Queue page, and on the next recording.
 
+### Delivery guarantee
+
+A recorded note's audio is deleted from the watch only (a) after the server answered 201 (it commits the assembled audio
+to its DB first), or (b) when the owner deletes it from the Queue page menu (with confirmation). A note with zero stored
+chunks is also removed (nothing to lose). Anything else that used to drop a note (HTTP 400, a 409 that keeps repeating,
+missing meta or chunk) now parks it in Storage `held`: audio and meta stay, it is not sent and does not block the queue.
+START on the Queue page moves held notes back to the end of the queue, restarting from chunk 0. The glance Q counts
+queued and held notes. While the app is open it writes Storage `fgAt`; the background service then leaves the queue
+alone (two processes writing `pend` would lose updates). A chunk written but not yet counted when the app died is
+recovered on the next start (the note then sends without `total_bytes`).
+
+**Uninstalling or deleting the app from the watch wipes its Storage, including unsent notes.** Check that the Queue page
+shows 0 (nothing queued or held) before replacing or removing the app.
+
 ## Audio
 
 Preferred: Ogg/Opus, 16 kHz mono. Fallback when `Capture.isFormatSupported` says no: WAV/LPCM 8 kHz mono (16-bit, about
@@ -67,7 +81,7 @@ Preferred: Ogg/Opus, 16 kHz mono. Fallback when `Capture.isFormatSupported` says
 
 Memory: audio is never held in RAM beyond about two chunks (~6 KB raw each, base64-encoded straight into
 `Application.Storage`), so the 768 KB app limit does not depend on the codec bitrate. Chunks are deleted when the server
-answers 201 (complete). If Storage fills up, recording stops early and sends what it has.
+answers 201 (complete) or the owner deletes the note. If Storage fills up, recording stops early and sends what it has.
 
 ## Upload
 

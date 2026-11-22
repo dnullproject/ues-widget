@@ -33,10 +33,12 @@ class NoteSession {
     private var _deadlineMs as Number = 0; // ST_STOPPING: finish anyway; ST_DONE/FAIL/ERR: exit
     private var _timer as Timer.Timer = new Timer.Timer();
     private var _nextRing as Number = 0; // System.getTimer() ms of the next alarm buzz
+    private var _fgAt as Number = 0; // Time.now() of the last "fgAt" write
 
     function initialize() {
         sender = new NoteSender(method(:onIdle));
-        sender.dropUnfinished();
+        fgPing();
+        sender.sealUnfinished();
         _timer.start(method(:onTick), 500, true);
         Math.srand(System.getTimer() + Time.now().value());
     }
@@ -66,10 +68,20 @@ class NoteSession {
         return state == ST_REC || state == ST_STOPPING;
     }
 
-    // Queue page: START. Pumps now; a note left unfinished by a crash is sealed first so it cannot block the queue.
+    // Tells the background service the app is open, so it leaves the note queue to us (see UesBg.notes)
+    private function fgPing() as Void {
+        _fgAt = Time.now().value();
+        try {
+            Application.Storage.setValue("fgAt", _fgAt);
+        } catch (e) {
+        }
+    }
+
+    // Queue page: START. Pumps now; held notes are requeued and a note left unfinished by a crash is sealed first.
     function retry() as Void {
         if (!recording()) {
-            sender.dropUnfinished();
+            sender.unhold();
+            sender.sealUnfinished();
             if (sender.ids().size() > 0) {
                 state = ST_SENDING;
             }
@@ -77,10 +89,12 @@ class NoteSession {
         sender.pump();
     }
 
+    // Owner's delete menu (confirmed): pend and held notes, oldest first
     function deleteFirst() as Void {
         var p = sender.ids();
+        p.addAll(sender.held());
         if (p.size() > 0 && !recording()) {
-            sender.drop(p[0], "");
+            sender.erase(p[0]); // allowed: explicit owner action
         }
     }
 
@@ -89,8 +103,9 @@ class NoteSession {
             return;
         }
         var p = sender.ids();
+        p.addAll(sender.held());
         for (var i = 0; i < p.size(); i++) {
-            sender.drop(p[i], "");
+            sender.erase(p[i]); // allowed: explicit owner action
         }
     }
 
@@ -182,9 +197,7 @@ class NoteSession {
             store(_buf);
             _buf = []b;
         }
-        var m = sender.meta(_id);
-        if (m == null || (m["c"] as Number) == 0) {
-            sender.drop(_id, "nothing recorded");
+        if (sender.removeEmpty(_id)) { // removed only when it holds no audio
             fail("Nothing recorded");
             return;
         }
@@ -194,8 +207,8 @@ class NoteSession {
     }
 
     private function fail(msg as String) as Void {
-        if (_id.length() > 0) {
-            sender.drop(_id, msg); // an unfinished note would block the queue
+        if (_id.length() > 0 && !sender.removeEmpty(_id)) { // a note with audio is sealed and queued, never removed
+            sender.finish(_id, _dur);
         }
         err = msg;
         state = ST_ERR;
@@ -210,6 +223,9 @@ class NoteSession {
         if (sender.failed) {
             state = ST_FAIL;
             _deadlineMs = System.getTimer() + 3000;
+        } else if (sender.ids().size() == 0 && sender.held().size() > 0) {
+            state = ST_FAIL; // nothing left to send automatically, but held notes need the owner
+            _deadlineMs = System.getTimer() + 3000;
         } else if (sender.ids().size() == 0) {
             state = ST_DONE;
             _deadlineMs = System.getTimer() + 2000;
@@ -219,6 +235,9 @@ class NoteSession {
 
     function onTick() as Void {
         var now = System.getTimer();
+        if (Time.now().value() - _fgAt >= 10) {
+            fgPing();
+        }
         if (state == ST_REC && elapsed() >= NOTE_MAX_S) {
             stop();
         } else if (state == ST_STOPPING && now >= _deadlineMs) {
@@ -260,7 +279,8 @@ class UesGlance extends WatchUi.GlanceView {
     function onUpdate(dc as Dc) as Void {
         var level = Application.Storage.getValue("level");
         var p = Application.Storage.getValue("pend");
-        var q = (p instanceof Array) ? (p as Array).size() : 0;
+        var h = Application.Storage.getValue("held");
+        var q = ((p instanceof Array) ? (p as Array).size() : 0) + ((h instanceof Array) ? (h as Array).size() : 0);
         var n = uesNextAlarm(Time.now().value() - 300);
         var tail = (q > 0) ? " · Q " + q : "";
         if (n != null && (n as Number) <= Time.now().value() + 3600) { // alarm within 60 min replaces the Q part
@@ -398,21 +418,24 @@ class UesView extends WatchUi.View {
         var mid = Graphics.TEXT_JUSTIFY_CENTER | Graphics.TEXT_JUSTIFY_VCENTER;
         var p = _s.sender.ids();
         var n = p.size() - (_s.recording() ? 1 : 0); // the note being recorded is not "unsent" yet
-        dc.setColor(n > 0 ? Graphics.COLOR_ORANGE : Graphics.COLOR_GREEN, Graphics.COLOR_TRANSPARENT);
-        dc.drawText(w / 2, h * 22 / 100, Graphics.FONT_MEDIUM, "Unsent: " + n, mid);
+        var hn = _s.sender.held().size();
+        dc.setColor(n + hn > 0 ? Graphics.COLOR_ORANGE : Graphics.COLOR_GREEN, Graphics.COLOR_TRANSPARENT);
+        dc.drawText(w / 2, h * 22 / 100, (hn > 0) ? Graphics.FONT_SMALL : Graphics.FONT_MEDIUM,
+            "Черга " + n + ((hn > 0) ? " · відкладено " + hn : ""), mid);
         dc.setColor(Graphics.COLOR_WHITE, Graphics.COLOR_TRANSPARENT);
         var m = (p.size() == 0) ? null : _s.sender.meta(p[0]);
         if (m != null) {
             var total = m["b"] as Number;
             var sent = (m["n"] as Number) * NOTE_CHUNK;
-            dc.drawText(w / 2, h * 38 / 100, Graphics.FONT_SMALL, ((sent > total) ? total : sent) + "/" + total + " B", mid);
+            dc.drawText(w / 2, h * 38 / 100, Graphics.FONT_SMALL,
+                (total < 0) ? (m["n"] as Number) + "/" + (m["c"] as Number) + " ch" : ((sent > total) ? total : sent) + "/" + total + " B", mid);
         }
         var code = Application.Storage.getValue("noteCode");
         dc.drawText(w / 2, h * 52 / 100, Graphics.FONT_SMALL, "code " + uesStr(code), mid);
         var ld = Application.Storage.getValue("lastDrop");
         if (ld != null) {
             dc.setColor(Graphics.COLOR_ORANGE, Graphics.COLOR_TRANSPARENT);
-            dc.drawText(w / 2, h * 66 / 100, Graphics.FONT_XTINY, "drop: " + ld, mid);
+            dc.drawText(w / 2, h * 66 / 100, Graphics.FONT_XTINY, ld, mid);
         }
         dc.setColor(Graphics.COLOR_LT_GRAY, Graphics.COLOR_TRANSPARENT);
         dc.drawText(w / 2, h * 80 / 100, Graphics.FONT_XTINY, "START: retry", mid);
@@ -488,12 +511,12 @@ class UesView extends WatchUi.View {
         } else if (st == ST_FAIL) {
             dc.setColor(Graphics.COLOR_ORANGE, Graphics.COLOR_TRANSPARENT);
             dc.drawText(w / 2, h * 44 / 100, Graphics.FONT_MEDIUM, "Not sent", mid);
-            dc.drawText(w / 2, h * 58 / 100, Graphics.FONT_SMALL, "will retry (" + _s.sender.lastCode + ")", mid);
+            dc.drawText(w / 2, h * 58 / 100, Graphics.FONT_SMALL, (_s.sender.held().size() > 0) ? "held: see Queue" : "will retry (" + _s.sender.lastCode + ")", mid);
         } else {
             dc.setColor(Graphics.COLOR_RED, Graphics.COLOR_TRANSPARENT);
             dc.drawText(w / 2, h / 2, Graphics.FONT_MEDIUM, _s.err, mid);
         }
-        var n = _s.sender.ids().size() - (_s.recording() ? 1 : 0);
+        var n = _s.sender.ids().size() + _s.sender.held().size() - (_s.recording() ? 1 : 0);
         if (n > 0) { // notes still queued on the watch
             dc.setColor(st == ST_FAIL ? Graphics.COLOR_ORANGE : Graphics.COLOR_LT_GRAY, Graphics.COLOR_TRANSPARENT);
             dc.drawText(w / 2, h * 12 / 100, Graphics.FONT_XTINY, n + " on watch", mid);
@@ -554,7 +577,7 @@ class UesDelegate extends WatchUi.BehaviorDelegate {
 
     // long-press UP on the Queue page
     function onMenu() as Boolean {
-        if (_s.page == PG_QUEUE && !_s.recording() && _s.sender.ids().size() > 0) {
+        if (_s.page == PG_QUEUE && !_s.recording() && _s.sender.ids().size() + _s.sender.held().size() > 0) {
             var m = new WatchUi.Menu2({:title => "Queue"});
             m.addItem(new WatchUi.MenuItem("Видалити першу", null, :first, {}));
             m.addItem(new WatchUi.MenuItem("Видалити все", null, :all, {}));
