@@ -43,6 +43,9 @@ private fun call(baseUrl: String, apiKey: String, method: String, path: String):
 fun fetchToday(baseUrl: String, apiKey: String): TodayResult =
     parseToday(call(baseUrl, apiKey, "GET", "/api/today"))
 
+fun fetchAlarms(baseUrl: String, apiKey: String): List<Alarm> =
+    parseAlarms(call(baseUrl, apiKey, "GET", "/api/alarms?channel=phone&hours=48"))
+
 /** Dashboard /api/widget (same API key); null when the dashboard is unreachable. */
 fun fetchSystem(dashboardUrl: String, apiKey: String): SystemSnapshot? =
     try { parseSystem(call(dashboardUrl, apiKey, "GET", "/api/widget")) } catch (e: Exception) { null }
