@@ -115,5 +115,8 @@ class RefreshService : Service() {
 
 /** Restarts the service after a reboot or an app update, both of which allow a foreground start. */
 class BootReceiver : BroadcastReceiver() {
-    override fun onReceive(context: Context, intent: Intent) = RefreshService.start(context)
+    override fun onReceive(context: Context, intent: Intent) {
+        AlarmScheduler.rescheduleStored(context)
+        RefreshService.start(context)
+    }
 }

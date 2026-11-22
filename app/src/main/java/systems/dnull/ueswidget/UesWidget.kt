@@ -165,6 +165,13 @@ private suspend fun loadSnapshot(context: Context): Snapshot = withContext(Dispa
         fetched.vitals
     }
     val sys = async { if (st.showSystem || st.showAgents) fetchSystem(dashboard, key) else null }
+    val alarms = async {
+        try {
+            AlarmScheduler.sync(context, fetchAlarms(url, key))
+        } catch (_: Exception) {
+        }
+    }
+    alarms.await()
     Snapshot(st, dashboard, today.await(), extras.await(), sys.await(), actionError)
 }
 
