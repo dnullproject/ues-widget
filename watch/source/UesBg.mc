@@ -81,12 +81,13 @@ class UesBg extends System.ServiceDelegate {
         }
         var fd = Application.Storage.getValue("alFired");
         var fired = (fd instanceof Array) ? fd as Array : [];
+        var seen = fired.slice(0, null); // two tasks at the same minute share fire_at: check the old list only
         var now = Time.now().value();
         var msg = "";
         for (var i = 0; i < (al as Array).size(); i++) {
             var a = (al as Array)[i] as Array;
             var t = a[0] as Number;
-            if (t <= now && t > now - 900 && fired.indexOf(t) < 0) {
+            if (t <= now && t > now - 900 && seen.indexOf(t) < 0) {
                 msg += ((msg.length() > 0) ? "\n" : "") + (a[1] as String);
                 fired.add(t);
             }
