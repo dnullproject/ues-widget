@@ -15,7 +15,7 @@ negative = Garmin error, e.g. -104 = phone not connected: the watch sends reques
 
 ## Settings
 
-- `baseUrl`, default `https://memory-ues.kudu-skate.ts.net` (the phone needs Tailscale; Garmin Connect makes the request)
+- `baseUrl`, default `https://memory.kudu-skate.ts.net` (the phone needs Tailscale; Garmin Connect makes the request)
 - `apiKey`, no default (never committed)
 
 A sideloaded app gets no settings from the phone, so the personal build bakes the key in:

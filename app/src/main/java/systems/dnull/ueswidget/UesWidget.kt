@@ -10,6 +10,7 @@ import androidx.glance.GlanceId
 import androidx.glance.GlanceModifier
 import androidx.glance.action.ActionParameters
 import androidx.glance.action.actionParametersOf
+import androidx.glance.action.actionStartActivity
 import androidx.glance.action.clickable
 import androidx.glance.appwidget.GlanceAppWidget
 import androidx.glance.appwidget.GlanceAppWidgetReceiver
@@ -158,7 +159,11 @@ private suspend fun loadSnapshot(context: Context): Snapshot = withContext(Dispa
             TodayResult(emptyList(), (e.message ?: e.javaClass.simpleName).take(40))
         }
     }
-    val extras = async { fetchVitals(url, key) }
+    val extras = async {
+        val fetched = fetchVitals(url, key)
+        InboxNotifier.notifyNew(context, fetched.inbox)
+        fetched.vitals
+    }
     val sys = async { if (st.showSystem || st.showAgents) fetchSystem(dashboard, key) else null }
     Snapshot(st, dashboard, today.await(), extras.await(), sys.await(), actionError)
 }
@@ -195,6 +200,7 @@ private fun Content(snap: Snapshot) {
     Column(GlanceModifier.fillMaxSize().background(st.bg).cornerRadius(st.corner.dp).padding(12.dp)) {
         Header(st, result, vitals.bb ?: result?.bbLevel, snap.fetchedAt, open)
         if (snap.actionError != null) Text(snap.actionError, style = TextStyle(color = RED, fontSize = st.sp(12)))
+        NextTimedTask(st, result, open)
         if (st.showStatus) Status(st, result)
         val msg = when {
             result == null -> "Налаштуй у застосунку"
@@ -241,11 +247,29 @@ private fun Header(st: WidgetStyle, result: TodayResult?, bb: Int?, fetchedAt: S
         // When the data was fetched, so a stale widget is visible at a glance.
         Text(" $fetchedAt", style = TextStyle(color = st.muted, fontSize = st.sp(11)))
         Text(
+            "🎤",
+            GlanceModifier.clickable(actionStartActivity<RecordActivity>()).padding(start = 10.dp, end = 2.dp),
+            style = TextStyle(color = st.muted, fontSize = st.sp(17))
+        )
+        Text(
             "⟳",
             GlanceModifier.clickable(actionRunCallback<RefreshCallback>()).padding(start = 10.dp, end = 2.dp),
             style = TextStyle(color = st.muted, fontSize = st.sp(17))
         )
     }
+}
+
+/** One line at the top for the next upcoming timed task today. */
+@Composable
+private fun NextTimedTask(st: WidgetStyle, result: TodayResult?, open: Action) {
+    if (result == null || result.error != null) return
+    val line = formatNextTimedTask(result.items) ?: return
+    Text(
+        line,
+        GlanceModifier.fillMaxWidth().padding(top = 2.dp, bottom = 2.dp).clickable(open),
+        style = TextStyle(color = YELLOW, fontSize = st.sp(13)),
+        maxLines = 1
+    )
 }
 
 /** One line under the header: the day is won, or what is next on the calendar. */

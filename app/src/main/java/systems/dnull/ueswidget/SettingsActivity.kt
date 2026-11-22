@@ -25,8 +25,10 @@ class SettingsActivity : Activity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        // The service's notification needs this from API 33; the service runs either way.
-        if (android.os.Build.VERSION.SDK_INT >= 33) requestPermissions(arrayOf(android.Manifest.permission.POST_NOTIFICATIONS), 0)
+        // Notifications (foreground service and inbox triage) need this from API 33; ask only while missing.
+        if (android.os.Build.VERSION.SDK_INT >= 33 &&
+            checkSelfPermission(android.Manifest.permission.POST_NOTIFICATIONS) != android.content.pm.PackageManager.PERMISSION_GRANTED
+        ) requestPermissions(arrayOf(android.Manifest.permission.POST_NOTIFICATIONS), 0)
         RefreshService.start(this)
         pad = (16 * resources.displayMetrics.density).toInt()
         col = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; setPadding(pad, pad, pad, pad) }
