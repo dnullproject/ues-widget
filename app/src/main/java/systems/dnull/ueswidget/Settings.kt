@@ -9,8 +9,8 @@ import java.net.URL
 import java.net.URLEncoder
 
 object Settings {
-    const val DEFAULT_BASE_URL = "https://memory-ues.kudu-skate.ts.net"
-    const val DEFAULT_DASHBOARD_URL = "https://dashboard.libra.dnull.systems/"
+    const val DEFAULT_BASE_URL = "https://memory.kudu-skate.ts.net"
+    const val DEFAULT_DASHBOARD_URL = "https://dashboard.dnull.systems/"
 
     private fun prefs(c: Context) = c.getSharedPreferences("ues_widget", Context.MODE_PRIVATE)
     fun baseUrl(c: Context) = prefs(c).getString("base_url", null) ?: DEFAULT_BASE_URL
