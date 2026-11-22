@@ -65,7 +65,9 @@ class AlarmFireReceiver : BroadcastReceiver() {
                     .setContentTitle(alarmNotificationTitle(start, title, kind))
                     .setContentIntent(tap)
                     .setAutoCancel(true)
-                    .build(),
+                    .build()
+                    // ring until the owner taps or swipes it, like an alarm clock
+                    .apply { flags = flags or Notification.FLAG_INSISTENT },
             )
         }
     }
