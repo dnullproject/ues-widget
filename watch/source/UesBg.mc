@@ -4,11 +4,15 @@ import Toybox.Communications;
 import Toybox.Lang;
 import Toybox.SensorHistory;
 import Toybox.System;
+import Toybox.Time;
 
+// Every 5 min: (a) POST the newest Body Battery sample if it is new, then (b) pump the voice-note queue.
+// Sequential on purpose: one web request at a time keeps the 64 KB background memory low.
 (:background)
-class UesBbDelegate extends System.ServiceDelegate {
+class UesBg extends System.ServiceDelegate {
     private var _level as Number = 0;
     private var _ts as Number = 0;
+    private var _sender as NoteSender? = null; // held so the sender outlives onTemporalEvent
 
     function initialize() {
         ServiceDelegate.initialize();
@@ -18,13 +22,13 @@ class UesBbDelegate extends System.ServiceDelegate {
         var it = SensorHistory.getBodyBatteryHistory({:period => 1, :order => SensorHistory.ORDER_NEWEST_FIRST});
         var s = (it == null) ? null : it.next();
         if (s == null || s.data == null) {
-            Background.exit(null);
+            notes();
             return;
         }
         _level = s.data.toNumber();
         _ts = s.when.value();
         if (_ts == Application.Storage.getValue("sentTs")) {
-            Background.exit(null); // nothing new since the last successful POST
+            notes(); // nothing new since the last successful POST
             return;
         }
         var url = Application.Properties.getValue("baseUrl") as String;
@@ -48,18 +52,26 @@ class UesBbDelegate extends System.ServiceDelegate {
         );
     }
 
-    // Write Storage here so dedup works while the widget is closed (onBackgroundData only runs when it is open);
-    // also hand the result to the app in case this device refuses background writes.
+    // Write Storage here so dedup and the Status page work while the app is closed.
     function onReceive(code as Number, data as Dictionary or String or Null) as Void {
-        var ok = code >= 200 && code < 300;
         try {
             Application.Storage.setValue("status", code);
-            if (ok) {
+            if (code >= 200 && code < 300) {
                 Application.Storage.setValue("sentTs", _ts);
                 Application.Storage.setValue("level", _level);
+                Application.Storage.setValue("bbAt", Time.now().value());
             }
         } catch (e) {
         }
-        Background.exit({"status" => code, "sentTs" => ok ? _ts : null, "level" => ok ? _level : null});
+        notes();
+    }
+
+    private function notes() as Void {
+        _sender = new NoteSender(method(:onIdle));
+        (_sender as NoteSender).pump(); // calls onIdle at once when the queue is empty
+    }
+
+    function onIdle() as Void {
+        Background.exit(null);
     }
 }

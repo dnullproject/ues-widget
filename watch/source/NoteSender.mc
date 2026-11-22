@@ -2,6 +2,7 @@ import Toybox.Application;
 import Toybox.Communications;
 import Toybox.Lang;
 import Toybox.System;
+import Toybox.Time;
 
 // Persistent upload queue shared by the foreground recorder and the background retry.
 // Storage layout: "pend" = [note_id...] (oldest first), "m<id>" = meta dict, "c<id>.<seq>" = base64 chunk string.
@@ -178,6 +179,7 @@ class NoteSender {
     function onReceive(code as Number, data as Dictionary or String or Null) as Void {
         _busy = false;
         lastCode = code;
+        mark(code);
         var m = meta(_id);
         if (m == null) {
             pump();
@@ -204,6 +206,17 @@ class NoteSender {
             return;
         }
         pump();
+    }
+
+    // Status page data, written from foreground and background: last reply code, time of the last complete note (201)
+    private function mark(code as Number) as Void {
+        try {
+            Application.Storage.setValue("noteCode", code);
+            if (code == 201) {
+                Application.Storage.setValue("noteAt", Time.now().value());
+            }
+        } catch (e) {
+        }
     }
 
     // first seq in {"missing":[2,5]}; falls back to `dflt` when the body cannot be read

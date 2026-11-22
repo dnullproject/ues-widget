@@ -1,6 +1,0 @@
-<resources>
-    <properties>
-        <property id="baseUrl" type="string">https://memory.kudu-skate.ts.net</property>
-        <property id="apiKey" type="string"></property>
-    </properties>
-</resources>

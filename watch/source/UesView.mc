@@ -9,19 +9,21 @@ import Toybox.Math;
 import Toybox.StringUtil;
 import Toybox.System;
 import Toybox.Time;
+import Toybox.Time.Gregorian;
 import Toybox.Timer;
 import Toybox.WatchUi;
 
-enum NoteState { ST_REC, ST_STOPPING, ST_SENDING, ST_DONE, ST_FAIL, ST_ERR }
+enum NoteState { ST_IDLE, ST_REC, ST_STOPPING, ST_SENDING, ST_DONE, ST_FAIL, ST_ERR }
+enum { PG_REC, PG_QUEUE, PG_STATUS, PG_COUNT }
 
 const NOTE_MAX_S = 180; // auto-stop
 const NOTE_CHUNK = 6000; // raw bytes per upload chunk
-const NOTE_RETRY_S = 300; // background retry period (Garmin minimum)
 
 // Records, queues chunks in Storage as they arrive (so RAM stays at ~2 chunks, far below the 768 KB limit,
 // whatever the codec bitrate) and uploads them while recording. A note is only ever held back for the last chunk.
 class NoteSession {
-    var state as NoteState = ST_REC;
+    var state as NoteState = ST_IDLE;
+    var page as Number = PG_REC; // UI page, kept here so the view and delegate share it
     var err as String = "";
     var sender as NoteSender;
     private var _id as String = "";
@@ -36,6 +38,14 @@ class NoteSession {
         sender.dropUnfinished();
         _timer.start(method(:onTick), 500, true);
         Math.srand(System.getTimer() + Time.now().value());
+    }
+
+    // START on the Record page while idle
+    function start() as Void {
+        _id = "";
+        _buf = []b;
+        _dur = 0;
+        err = "";
         // [format, fallback format]: Opus in Ogg is ~10x smaller than LPCM
         var fmts = [
             [{:containerFormat => Audio.CONTAINER_OGG, :codec => Audio.CODEC_OPUS, :frequency => Audio.FREQ_16_KHZ, :channels => Audio.CHANNEL_MONO}, "ogg_opus"],
@@ -51,6 +61,38 @@ class NoteSession {
         fail("No mic format");
     }
 
+    function recording() as Boolean {
+        return state == ST_REC || state == ST_STOPPING;
+    }
+
+    // Queue page: START. Pumps now; a note left unfinished by a crash is sealed first so it cannot block the queue.
+    function retry() as Void {
+        if (!recording()) {
+            sender.dropUnfinished();
+            if (sender.ids().size() > 0) {
+                state = ST_SENDING;
+            }
+        }
+        sender.pump();
+    }
+
+    function deleteFirst() as Void {
+        var p = sender.ids();
+        if (p.size() > 0 && !recording()) {
+            sender.drop(p[0], "");
+        }
+    }
+
+    function deleteAll() as Void {
+        if (recording()) {
+            return;
+        }
+        var p = sender.ids();
+        for (var i = 0; i < p.size(); i++) {
+            sender.drop(p[i], "");
+        }
+    }
+
     private function begin(f as AudioFormat, name as String) as Void {
         try {
             Capture.initializeAudioCapture(self as Capture.Callbacks, {
@@ -58,15 +100,15 @@ class NoteSession {
             });
             _id = Time.now().value().toString() + "-" + (Math.rand() % 100000).format("%05d");
             sender.create(_id, name, Time.now().value());
+            state = ST_REC;
+            _startMs = System.getTimer();
             Capture.start();
         } catch (e) {
             fail("Mic unavailable");
             return;
         }
-        _startMs = System.getTimer();
         buzz();
         sender.pump(); // retry notes left over from an earlier failure while this one records
-        ensureRetry();
     }
 
     function elapsed() as Number {
@@ -76,15 +118,13 @@ class NoteSession {
         return _dur;
     }
 
-    // START / BACK
+    // START / BACK while recording; the note is queued and the background sends it if the app is left
     function stop() as Void {
         if (state == ST_REC) {
             state = ST_STOPPING;
             _deadlineMs = System.getTimer() + 2000;
             buzz();
             Capture.stop(); // flushes the rest through onData, then onComplete
-        } else if (state != ST_STOPPING) {
-            System.exit(); // leaving early: the queue goes on in the background
         }
     }
 
@@ -149,7 +189,6 @@ class NoteSession {
         }
         sender.finish(_id, _dur);
         state = ST_SENDING;
-        ensureRetry();
         sender.pump();
     }
 
@@ -173,7 +212,6 @@ class NoteSession {
         } else if (sender.ids().size() == 0) {
             state = ST_DONE;
             _deadlineMs = System.getTimer() + 2000;
-            Background.deleteTemporalEvent();
             buzz();
         }
     }
@@ -185,15 +223,10 @@ class NoteSession {
         } else if (state == ST_STOPPING && now >= _deadlineMs) {
             finish(); // onComplete never came
         } else if ((state == ST_DONE || state == ST_FAIL || state == ST_ERR) && now >= _deadlineMs) {
-            System.exit();
+            state = ST_IDLE;
         }
-        WatchUi.requestUpdate();
-    }
-
-    // Registered only when missing: re-registering would push the next run back.
-    private function ensureRetry() as Void {
-        if (Background.getTemporalEventRegisteredTime() == null) {
-            Background.registerForTemporalEvent(new Time.Duration(NOTE_RETRY_S));
+        if (state != ST_IDLE) {
+            WatchUi.requestUpdate();
         }
     }
 
@@ -204,7 +237,38 @@ class NoteSession {
     }
 }
 
-class UesNoteView extends WatchUi.View {
+// "BB <level> · Q <n>" (Q only when notes are queued); reads Storage only, to stay within the 64 KB glance limit
+(:glance)
+class UesGlance extends WatchUi.GlanceView {
+    function initialize() {
+        GlanceView.initialize();
+    }
+
+    function onUpdate(dc as Dc) as Void {
+        var level = Application.Storage.getValue("level");
+        var p = Application.Storage.getValue("pend");
+        var q = (p instanceof Array) ? (p as Array).size() : 0;
+        var txt = "BB " + ((level == null) ? "--" : level.toString()) + ((q > 0) ? " · Q " + q : "");
+        dc.setColor(Graphics.COLOR_WHITE, Graphics.COLOR_TRANSPARENT);
+        dc.drawText(0, dc.getHeight() / 2, Graphics.FONT_GLANCE, txt, Graphics.TEXT_JUSTIFY_LEFT | Graphics.TEXT_JUSTIFY_VCENTER);
+    }
+}
+
+// HH:mm of a Storage timestamp, "--:--" when never
+function uesHm(ts as Application.PropertyValueType) as String {
+    if (!(ts instanceof Number)) {
+        return "--:--";
+    }
+    var t = Gregorian.info(new Time.Moment(ts as Number), Time.FORMAT_SHORT);
+    return t.hour.format("%02d") + ":" + t.min.format("%02d");
+}
+
+function uesStr(v as Application.PropertyValueType) as String {
+    return (v == null) ? "--" : v.toString();
+}
+
+// Three pages (UP/DOWN): Record, Queue, Status. Pure black background: AMOLED pixels stay off except the few drawn ones.
+class UesView extends WatchUi.View {
     private var _s as NoteSession;
 
     function initialize(s as NoteSession) {
@@ -225,23 +289,74 @@ class UesNoteView extends WatchUi.View {
         }
     }
 
-    // Pure black background: AMOLED pixels stay off except the few drawn ones.
     function onUpdate(dc as Dc) as Void {
         if (dc has :setAntiAlias) {
             dc.setAntiAlias(true);
         }
-        var w = dc.getWidth();
-        var h = dc.getHeight();
-        var edge = w / 2;
         dc.setColor(Graphics.COLOR_WHITE, Graphics.COLOR_BLACK);
         dc.clear();
-        dc.setColor(Graphics.COLOR_DK_GRAY, Graphics.COLOR_TRANSPARENT);
-        var ld = Application.Storage.getValue("lastDrop");
-        dc.drawText(dc.getWidth() / 2, dc.getHeight() * 93 / 100, Graphics.FONT_XTINY, (ld == null) ? BUILD : BUILD + " | " + ld,
-            Graphics.TEXT_JUSTIFY_CENTER | Graphics.TEXT_JUSTIFY_VCENTER);
-        var st = _s.state;
+        var w = dc.getWidth();
+        var h = dc.getHeight();
+        if (_s.page == PG_REC) {
+            drawRecord(dc, w, h);
+        } else if (_s.page == PG_QUEUE) {
+            drawQueue(dc, w, h);
+        } else {
+            drawStatus(dc, w, h);
+        }
+        for (var i = 0; i < PG_COUNT; i++) { // page dots
+            dc.setColor(i == _s.page ? Graphics.COLOR_WHITE : Graphics.COLOR_DK_GRAY, Graphics.COLOR_TRANSPARENT);
+            dc.fillCircle(w / 2 + (i - 1) * 16, h * 5 / 100, 4);
+        }
+    }
+
+    private function drawQueue(dc as Dc, w as Number, h as Number) as Void {
         var mid = Graphics.TEXT_JUSTIFY_CENTER | Graphics.TEXT_JUSTIFY_VCENTER;
-        if (st == ST_REC || st == ST_STOPPING) {
+        var p = _s.sender.ids();
+        var n = p.size() - (_s.recording() ? 1 : 0); // the note being recorded is not "unsent" yet
+        dc.setColor(n > 0 ? Graphics.COLOR_ORANGE : Graphics.COLOR_GREEN, Graphics.COLOR_TRANSPARENT);
+        dc.drawText(w / 2, h * 22 / 100, Graphics.FONT_MEDIUM, "Unsent: " + n, mid);
+        dc.setColor(Graphics.COLOR_WHITE, Graphics.COLOR_TRANSPARENT);
+        var m = (p.size() == 0) ? null : _s.sender.meta(p[0]);
+        if (m != null) {
+            var total = m["b"] as Number;
+            var sent = (m["n"] as Number) * NOTE_CHUNK;
+            dc.drawText(w / 2, h * 38 / 100, Graphics.FONT_SMALL, ((sent > total) ? total : sent) + "/" + total + " B", mid);
+        }
+        var code = Application.Storage.getValue("noteCode");
+        dc.drawText(w / 2, h * 52 / 100, Graphics.FONT_SMALL, "code " + uesStr(code), mid);
+        var ld = Application.Storage.getValue("lastDrop");
+        if (ld != null) {
+            dc.setColor(Graphics.COLOR_ORANGE, Graphics.COLOR_TRANSPARENT);
+            dc.drawText(w / 2, h * 66 / 100, Graphics.FONT_XTINY, "drop: " + ld, mid);
+        }
+        dc.setColor(Graphics.COLOR_LT_GRAY, Graphics.COLOR_TRANSPARENT);
+        dc.drawText(w / 2, h * 80 / 100, Graphics.FONT_XTINY, "START: retry", mid);
+        dc.drawText(w / 2, h * 88 / 100, Graphics.FONT_XTINY, "hold UP: delete", mid);
+    }
+
+    private function drawStatus(dc as Dc, w as Number, h as Number) as Void {
+        var mid = Graphics.TEXT_JUSTIFY_CENTER | Graphics.TEXT_JUSTIFY_VCENTER;
+        var phone = System.getDeviceSettings().phoneConnected;
+        dc.setColor(Graphics.COLOR_WHITE, Graphics.COLOR_TRANSPARENT);
+        dc.drawText(w / 2, h * 22 / 100, Graphics.FONT_MEDIUM, "UES " + BUILD, mid);
+        dc.setColor(phone ? Graphics.COLOR_GREEN : Graphics.COLOR_RED, Graphics.COLOR_TRANSPARENT);
+        dc.drawText(w / 2, h * 36 / 100, Graphics.FONT_SMALL, phone ? "phone: connected" : "phone: NO", mid);
+        dc.setColor(Graphics.COLOR_WHITE, Graphics.COLOR_TRANSPARENT);
+        dc.drawText(w / 2, h * 50 / 100, Graphics.FONT_SMALL,
+            "BB " + uesStr(Application.Storage.getValue("level")) + " at " + uesHm(Application.Storage.getValue("bbAt")), mid);
+        dc.drawText(w / 2, h * 62 / 100, Graphics.FONT_SMALL, "BB HTTP " + uesStr(Application.Storage.getValue("status")), mid);
+        dc.drawText(w / 2, h * 74 / 100, Graphics.FONT_SMALL, "note ok " + uesHm(Application.Storage.getValue("noteAt")), mid);
+    }
+
+    private function drawRecord(dc as Dc, w as Number, h as Number) as Void {
+        var edge = w / 2;
+        var mid = Graphics.TEXT_JUSTIFY_CENTER | Graphics.TEXT_JUSTIFY_VCENTER;
+        var st = _s.state;
+        if (st == ST_IDLE) {
+            dc.setColor(Graphics.COLOR_WHITE, Graphics.COLOR_TRANSPARENT);
+            dc.drawText(w / 2, h / 2, Graphics.FONT_MEDIUM, "START — запис", mid);
+        } else if (st == ST_REC || st == ST_STOPPING) {
             var on = (System.getTimer() / 500) % 2 == 0;
             dc.setColor(on ? Graphics.COLOR_RED : Graphics.COLOR_DK_RED, Graphics.COLOR_TRANSPARENT);
             var rw = on ? 16 : 8;
@@ -280,7 +395,7 @@ class UesNoteView extends WatchUi.View {
             dc.setColor(Graphics.COLOR_RED, Graphics.COLOR_TRANSPARENT);
             dc.drawText(w / 2, h / 2, Graphics.FONT_MEDIUM, _s.err, mid);
         }
-        var n = _s.sender.ids().size() - ((st == ST_REC || st == ST_STOPPING) ? 1 : 0);
+        var n = _s.sender.ids().size() - (_s.recording() ? 1 : 0);
         if (n > 0) { // notes still queued on the watch
             dc.setColor(st == ST_FAIL ? Graphics.COLOR_ORANGE : Graphics.COLOR_LT_GRAY, Graphics.COLOR_TRANSPARENT);
             dc.drawText(w / 2, h * 12 / 100, Graphics.FONT_XTINY, n + " on watch", mid);
@@ -288,7 +403,7 @@ class UesNoteView extends WatchUi.View {
     }
 }
 
-class UesNoteDelegate extends WatchUi.BehaviorDelegate {
+class UesDelegate extends WatchUi.BehaviorDelegate {
     private var _s as NoteSession;
 
     function initialize(s as NoteSession) {
@@ -296,14 +411,87 @@ class UesNoteDelegate extends WatchUi.BehaviorDelegate {
         _s = s;
     }
 
+    // START: Record page toggles recording, Queue page retries
     function onSelect() as Boolean {
-        _s.stop();
+        if (_s.page == PG_REC) {
+            if (_s.state == ST_REC) {
+                _s.stop();
+            } else if (!_s.recording()) {
+                _s.start();
+            }
+        } else if (_s.page == PG_QUEUE) {
+            _s.retry();
+        }
+        WatchUi.requestUpdate();
         return true;
     }
 
-    // BACK stops and sends instead of leaving; once the note is sending/failed it leaves the app.
+    // BACK while recording stops and queues (never drops audio); otherwise leaves the app
     function onBack() as Boolean {
-        _s.stop();
+        if (_s.recording()) {
+            _s.stop();
+            return true;
+        }
+        return false;
+    }
+
+    function onNextPage() as Boolean {
+        _s.page = (_s.page + 1) % PG_COUNT;
+        WatchUi.requestUpdate();
+        return true;
+    }
+
+    function onPreviousPage() as Boolean {
+        _s.page = (_s.page + PG_COUNT - 1) % PG_COUNT;
+        WatchUi.requestUpdate();
+        return true;
+    }
+
+    // long-press UP on the Queue page
+    function onMenu() as Boolean {
+        if (_s.page == PG_QUEUE && !_s.recording() && _s.sender.ids().size() > 0) {
+            var m = new WatchUi.Menu2({:title => "Queue"});
+            m.addItem(new WatchUi.MenuItem("Видалити першу", null, :first, {}));
+            m.addItem(new WatchUi.MenuItem("Видалити все", null, :all, {}));
+            WatchUi.pushView(m, new UesMenuDelegate(_s), WatchUi.SLIDE_UP);
+        }
+        return true;
+    }
+}
+
+class UesMenuDelegate extends WatchUi.Menu2InputDelegate {
+    private var _s as NoteSession;
+
+    function initialize(s as NoteSession) {
+        Menu2InputDelegate.initialize();
+        _s = s;
+    }
+
+    function onSelect(item as WatchUi.MenuItem) as Void {
+        var first = item.getId() == :first;
+        WatchUi.switchToView(new WatchUi.Confirmation(first ? "Видалити першу?" : "Видалити все?"),
+            new UesConfirmDelegate(_s, first), WatchUi.SLIDE_IMMEDIATE);
+    }
+}
+
+class UesConfirmDelegate extends WatchUi.ConfirmationDelegate {
+    private var _s as NoteSession;
+    private var _first as Boolean;
+
+    function initialize(s as NoteSession, first as Boolean) {
+        ConfirmationDelegate.initialize();
+        _s = s;
+        _first = first;
+    }
+
+    function onResponse(response as WatchUi.Confirm) as Boolean {
+        if (response == WatchUi.CONFIRM_YES) {
+            if (_first) {
+                _s.deleteFirst();
+            } else {
+                _s.deleteAll();
+            }
+        }
         return true;
     }
 }

@@ -1,15 +1,13 @@
 #!/usr/bin/env bash
-# Build <app>/bin/<prefix>-<device>-v<VERSION>.prg for each device (default: all in manifest.xml).
-# App: $APP_DIR, default watch (-> ues-bb); APP_DIR=watch-note -> ues-note.
+# Build watch/bin/ues-<device>-v<VERSION>.prg for each device (default: all in manifest.xml).
 # Needs `monkeyc` on PATH and the device files in ~/.Garmin/ConnectIQ/Devices.
 # Signing key: $CIQ_DEVELOPER_KEY_B64 (base64 DER) if set, else a throwaway key (the .prg works for sideloading).
 set -euo pipefail
-cd "$(dirname "$0")/../${APP_DIR:-watch}"
-case "$(basename "$PWD")" in watch-note) prefix=ues-note ;; *) prefix=ues-bb ;; esac
+cd "$(dirname "$0")"
 out="$PWD/bin"
 # Build from a temp copy so the stamp (and a baked key) never touch the checkout.
 src=$(mktemp -d); cp -r . "$src"; trap 'rm -rf "$src"' EXIT
-# Version shown small at the bottom of the app: semver from <app>/VERSION (bump it with every build you hand out).
+# Version shown small at the bottom of the app: semver from watch/VERSION (bump it with every build you hand out).
 echo "const BUILD = \"v$(cat VERSION)\";" > "$src/source/BuildInfo.mc"
 # Sideloaded apps get no settings from the phone, so a personal build bakes $UES_API_KEY in (never in CI: the repo is public).
 if [ -n "${UES_API_KEY:-}" ]; then
@@ -31,6 +29,6 @@ else
 fi
 mkdir -p "$out"
 for d in "${devices[@]}"; do
-  monkeyc -d "$d" -f monkey.jungle -o "$out/$prefix-$d-v$(cat VERSION).prg" -y "$key" -w
+  monkeyc -d "$d" -f monkey.jungle -o "$out/ues-$d-v$(cat VERSION).prg" -y "$key" -w
 done
 rm -f "$key"
