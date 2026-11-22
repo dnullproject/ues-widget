@@ -32,6 +32,7 @@ class NoteSession {
     private var _dur as Number = 0;
     private var _deadlineMs as Number = 0; // ST_STOPPING: finish anyway; ST_DONE/FAIL/ERR: exit
     private var _timer as Timer.Timer = new Timer.Timer();
+    private var _nextRing as Number = 0; // System.getTimer() ms of the next alarm buzz
 
     function initialize() {
         sender = new NoteSender(method(:onIdle));
@@ -225,6 +226,18 @@ class NoteSession {
         } else if ((state == ST_DONE || state == ST_FAIL || state == ST_ERR) && now >= _deadlineMs) {
             state = ST_IDLE;
         }
+        if (!recording() && now >= _nextRing && uesDue().size() > 0) { // due alarm: buzz now and every 10 s until dismissed
+            _nextRing = now + 10000;
+            if (Attention has :vibrate) {
+                var on = new Attention.VibeProfile(100, 400);
+                var off = new Attention.VibeProfile(0, 200);
+                Attention.vibrate([on, off, on, off, on] as Array<Attention.VibeProfile>);
+            }
+            if (Attention has :playTone) {
+                Attention.playTone(Attention.TONE_ALARM);
+            }
+            WatchUi.requestUpdate();
+        }
         if (state != ST_IDLE) {
             WatchUi.requestUpdate();
         }
@@ -248,13 +261,63 @@ class UesGlance extends WatchUi.GlanceView {
         var level = Application.Storage.getValue("level");
         var p = Application.Storage.getValue("pend");
         var q = (p instanceof Array) ? (p as Array).size() : 0;
-        var txt = "BB " + ((level == null) ? "--" : level.toString()) + ((q > 0) ? " · Q " + q : "");
+        var n = uesNextAlarm(Time.now().value() - 300);
+        var tail = (q > 0) ? " · Q " + q : "";
+        if (n != null && (n as Number) <= Time.now().value() + 3600) { // alarm within 60 min replaces the Q part
+            tail = " · \u23F0 " + uesHm(n);
+        }
+        var txt = "BB " + ((level == null) ? "--" : level.toString()) + tail;
         dc.setColor(Graphics.COLOR_WHITE, Graphics.COLOR_TRANSPARENT);
         dc.drawText(0, dc.getHeight() / 2, Graphics.FONT_GLANCE, txt, Graphics.TEXT_JUSTIFY_LEFT | Graphics.TEXT_JUSTIFY_VCENTER);
     }
 }
 
+// fire_at of the first stored alarm at or after minFire, null when none
+(:glance)
+function uesNextAlarm(minFire as Number) as Number? {
+    var al = Application.Storage.getValue("al");
+    if (al instanceof Array) {
+        for (var i = 0; i < (al as Array).size(); i++) {
+            var t = ((al as Array)[i] as Array)[0] as Number;
+            if (t >= minFire) {
+                return t;
+            }
+        }
+    }
+    return null;
+}
+
+// Stored alarms due now (up to 15 min late) and not acknowledged yet
+function uesDue() as Array {
+    var al = Application.Storage.getValue("al");
+    var ack = Application.Storage.getValue("alAck");
+    var now = Time.now().value();
+    var out = [];
+    if (al instanceof Array) {
+        for (var i = 0; i < (al as Array).size(); i++) {
+            var a = (al as Array)[i] as Array;
+            var t = a[0] as Number;
+            if (t <= now && t > now - 900 && !(ack instanceof Array && (ack as Array).indexOf(t) >= 0)) {
+                out.add(a);
+            }
+        }
+    }
+    return out;
+}
+
+// START / BACK on the alarm screen: mark every due alarm acknowledged (keeps the last 20 fire_at values)
+function uesAck() as Void {
+    var due = uesDue();
+    var ack = Application.Storage.getValue("alAck");
+    var l = (ack instanceof Array) ? ack as Array : [];
+    for (var i = 0; i < due.size(); i++) {
+        l.add((due[i] as Array)[0]);
+    }
+    Application.Storage.setValue("alAck", (l.size() > 20) ? l.slice(l.size() - 20, null) : l);
+}
+
 // HH:mm of a Storage timestamp, "--:--" when never
+(:glance)
 function uesHm(ts as Application.PropertyValueType) as String {
     if (!(ts instanceof Number)) {
         return "--:--";
@@ -297,6 +360,11 @@ class UesView extends WatchUi.View {
         dc.clear();
         var w = dc.getWidth();
         var h = dc.getHeight();
+        var due = _s.recording() ? [] : uesDue(); // recording is never interrupted
+        if (due.size() > 0) {
+            drawAlarm(dc, w, h, due);
+            return;
+        }
         if (_s.page == PG_REC) {
             drawRecord(dc, w, h);
         } else if (_s.page == PG_QUEUE) {
@@ -308,6 +376,22 @@ class UesView extends WatchUi.View {
             dc.setColor(i == _s.page ? Graphics.COLOR_WHITE : Graphics.COLOR_DK_GRAY, Graphics.COLOR_TRANSPARENT);
             dc.fillCircle(w / 2 + (i - 1) * 16, h * 5 / 100, 4);
         }
+    }
+
+    // Big time, title below; START or BACK dismisses all due alarms
+    private function drawAlarm(dc as Dc, w as Number, h as Number, due as Array) as Void {
+        var mid = Graphics.TEXT_JUSTIFY_CENTER | Graphics.TEXT_JUSTIFY_VCENTER;
+        var txt = (due[0] as Array)[1] as String; // "HH:MM title"
+        dc.setColor(Graphics.COLOR_ORANGE, Graphics.COLOR_TRANSPARENT);
+        dc.drawText(w / 2, h * 30 / 100, Graphics.FONT_NUMBER_HOT, txt.substring(0, 5), mid);
+        dc.setColor(Graphics.COLOR_WHITE, Graphics.COLOR_TRANSPARENT);
+        var title = (txt.length() > 6) ? txt.substring(6, txt.length()) : "";
+        dc.drawText(w / 2, h * 54 / 100, (title.length() > 20) ? Graphics.FONT_XTINY : Graphics.FONT_SMALL, title, mid);
+        if (due.size() > 1) {
+            dc.drawText(w / 2, h * 66 / 100, Graphics.FONT_XTINY, "+" + (due.size() - 1), mid);
+        }
+        dc.setColor(Graphics.COLOR_LT_GRAY, Graphics.COLOR_TRANSPARENT);
+        dc.drawText(w / 2, h * 82 / 100, Graphics.FONT_XTINY, "START: ok", mid);
     }
 
     private function drawQueue(dc as Dc, w as Number, h as Number) as Void {
@@ -339,14 +423,28 @@ class UesView extends WatchUi.View {
         var mid = Graphics.TEXT_JUSTIFY_CENTER | Graphics.TEXT_JUSTIFY_VCENTER;
         var phone = System.getDeviceSettings().phoneConnected;
         dc.setColor(Graphics.COLOR_WHITE, Graphics.COLOR_TRANSPARENT);
-        dc.drawText(w / 2, h * 22 / 100, Graphics.FONT_MEDIUM, "UES " + BUILD, mid);
+        dc.drawText(w / 2, h * 18 / 100, Graphics.FONT_MEDIUM, "UES " + BUILD, mid);
         dc.setColor(phone ? Graphics.COLOR_GREEN : Graphics.COLOR_RED, Graphics.COLOR_TRANSPARENT);
-        dc.drawText(w / 2, h * 36 / 100, Graphics.FONT_SMALL, phone ? "phone: connected" : "phone: NO", mid);
+        dc.drawText(w / 2, h * 30 / 100, Graphics.FONT_SMALL, phone ? "phone: connected" : "phone: NO", mid);
         dc.setColor(Graphics.COLOR_WHITE, Graphics.COLOR_TRANSPARENT);
-        dc.drawText(w / 2, h * 50 / 100, Graphics.FONT_SMALL,
+        dc.drawText(w / 2, h * 42 / 100, Graphics.FONT_SMALL,
             "BB " + uesStr(Application.Storage.getValue("level")) + " at " + uesHm(Application.Storage.getValue("bbAt")), mid);
-        dc.drawText(w / 2, h * 62 / 100, Graphics.FONT_SMALL, "BB HTTP " + uesStr(Application.Storage.getValue("status")), mid);
-        dc.drawText(w / 2, h * 74 / 100, Graphics.FONT_SMALL, "note ok " + uesHm(Application.Storage.getValue("noteAt")), mid);
+        dc.drawText(w / 2, h * 53 / 100, Graphics.FONT_SMALL, "BB HTTP " + uesStr(Application.Storage.getValue("status")), mid);
+        dc.drawText(w / 2, h * 64 / 100, Graphics.FONT_SMALL, "note ok " + uesHm(Application.Storage.getValue("noteAt")), mid);
+        var now = Time.now().value();
+        var al = Application.Storage.getValue("al");
+        var n = 0;
+        if (al instanceof Array) {
+            for (var i = 0; i < (al as Array).size(); i++) {
+                if ((((al as Array)[i] as Array)[0] as Number) > now) {
+                    n++;
+                }
+            }
+        }
+        var nx = uesNextAlarm(now);
+        dc.drawText(w / 2, h * 75 / 100, Graphics.FONT_XTINY, "Будильники: " + n + " · next " + uesHm(nx), mid);
+        dc.drawText(w / 2, h * 85 / 100, Graphics.FONT_XTINY,
+            "fetch " + uesHm(Application.Storage.getValue("alAt")) + " · " + uesStr(Application.Storage.getValue("alCode")), mid);
     }
 
     private function drawRecord(dc as Dc, w as Number, h as Number) as Void {
@@ -413,7 +511,9 @@ class UesDelegate extends WatchUi.BehaviorDelegate {
 
     // START: Record page toggles recording, Queue page retries
     function onSelect() as Boolean {
-        if (_s.page == PG_REC) {
+        if (!_s.recording() && uesDue().size() > 0) {
+            uesAck();
+        } else if (_s.page == PG_REC) {
             if (_s.state == ST_REC) {
                 _s.stop();
             } else if (!_s.recording()) {
@@ -428,6 +528,11 @@ class UesDelegate extends WatchUi.BehaviorDelegate {
 
     // BACK while recording stops and queues (never drops audio); otherwise leaves the app
     function onBack() as Boolean {
+        if (!_s.recording() && uesDue().size() > 0) {
+            uesAck();
+            WatchUi.requestUpdate();
+            return true;
+        }
         if (_s.recording()) {
             _s.stop();
             return true;

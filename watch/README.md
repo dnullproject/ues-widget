@@ -8,16 +8,16 @@ permissions AudioInput, Background, Communications, SensorHistory.
 
 ## What it does
 
-- Glance (watch-app "super app" glance): `BB <level> · Q <n>` (Q only when notes are queued).
-- Background, every 5 min (always registered at app start): (a) POST the newest Body Battery sample, (b) upload the
-  voice-note queue. One web request at a time.
+- Glance (watch-app "super app" glance): `BB <level> · Q <n>` (Q only when notes are queued); `BB <level> · ⏰ HH:MM` instead when an alarm fires within 60 min.
+- Background, every 5 min (always registered at app start): (0) fire due watch alarms, (a) POST the newest Body Battery
+  sample, (b) fetch alarms (at most every 25 min), (c) upload the voice-note queue. One web request at a time.
 - Foreground, three pages switched with UP/DOWN:
 
 | Page | START | Other keys |
 |------|-------|------------|
 | Record | idle: start recording (nothing records on open); recording: stop and queue | BACK while recording: stop and queue (audio is never dropped); BACK otherwise leaves the app |
 | Queue (unsent count, bytes sent/total of the oldest note, last reply code, last drop reason) | retry now | MENU (long-press UP): delete first / delete all, each with a confirmation |
-| Status (version, phone connected, last BB send time + level + HTTP code, last complete note time) | nothing | |
+| Status (version, phone connected, last BB send time + level + HTTP code, last complete note time, alarm count + next, last alarm fetch time + code) | nothing | |
 
 Playback of recordings is not possible (Connect IQ cannot play captured audio).
 
@@ -31,6 +31,27 @@ POST <baseUrl>/api/body-battery        header X-API-Key: <apiKey>
 A sample is sent once; if its timestamp equals the last successfully sent one (`sentTs` in Storage), nothing is posted.
 HTTP: 201 = ok, 401 = bad key, 400 = bad input, negative = Garmin error, e.g. -104 = phone not connected (the watch
 sends requests through the phone's Bluetooth).
+
+## Watch alarms
+
+The owner flags a task `alarm_watch` in the dashboard; the watch fetches upcoming alarms ahead of time and fires them
+locally, so they ring even when the phone is out of reach at that moment.
+
+```
+GET <baseUrl>/api/alarms?channel=watch&hours=24        header X-API-Key: <apiKey>
+{"alarms": [{"id": "<task>:<fire_at>", "title": "...", "start": "09:00", "kind": "pre"|"at", "fire_at": <unix s UTC>}]}
+```
+
+- Fetched at most every 25 min (and when the list is older than that), kept in Storage `al` = `[[fire_at, "HH:MM title", kind]...]`
+  (max 20, text at most 40 chars). A failed fetch keeps the old list and only updates `alCode`.
+- Firing happens first in each background event, before any web request: every stored alarm with
+  `now - 15 min < fire_at <= now` not in `alFired` calls `Background.requestApplicationWake("⏰ HH:MM title")` once
+  (several due at once become one message). **Lateness is up to 5 min**: Connect IQ temporal events cannot run more often
+  than every 300 s. Alarms older than 15 min are skipped (watch was off).
+- With the app open, a due and unacknowledged alarm replaces the screen: big time + title, strong 3-pulse vibration and
+  `TONE_ALARM`, repeated every 10 s until START or BACK dismisses it (`alAck`). Nothing interrupts a recording; the alarm
+  shows after it. The foreground check runs every 0.5 s, so with the app open it is on time.
+- Storage keys: `al`, `alAt` (last successful fetch), `alCode` (last fetch HTTP code), `alFired`, `alAck`.
 
 ## Voice notes
 
@@ -72,7 +93,8 @@ builds keyless, only to prove it compiles. A Connect IQ store (beta) install doe
 Install: connect the watch over USB, copy the `.prg` to `GARMIN/APPS/`, eject, open the app once (registers the
 background event). Assign it to a hot key under Settings -> System -> Hot Keys if wanted.
 
-Not verified on a real watch or the simulator (headless VM): the compile for `fenix847mm` is the only check.
+Not verified on a real watch or the simulator (headless VM): the compile for `fenix847mm` is the only check. Unconfirmed on a
+real device: the `⏰` glyph in the glance and wake prompt, `requestApplicationWake` text length, background memory with 20 alarms.
 
 ## Battery
 
