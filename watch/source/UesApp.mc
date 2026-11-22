@@ -6,12 +6,11 @@ import Toybox.Time;
 import Toybox.WatchUi;
 
 (:background :glance)
-class UesBbApp extends Application.AppBase {
+class UesApp extends Application.AppBase {
     function initialize() {
         AppBase.initialize();
     }
 
-    // The widget must be opened once after install so this registers the 5 min background event.
     // Registered only when missing: re-registering would push the next run back.
     function onStart(state as Dictionary?) as Void {
         if (Background.getTemporalEventRegisteredTime() == null) {
@@ -19,30 +18,25 @@ class UesBbApp extends Application.AppBase {
         }
     }
 
+    // Opening the app shows the Record page; recording starts only from START.
     (:typecheck([disableBackgroundCheck, disableGlanceCheck]))
     function getInitialView() as [Views] or [Views, InputDelegates] {
-        return [new UesBbView()];
+        var s = new NoteSession();
+        return [new UesView(s), new UesDelegate(s)];
     }
 
     (:glance)
     function getGlanceView() as [GlanceView] or [GlanceView, GlanceViewDelegate] or Null {
-        return [new UesBbGlance()];
+        return [new UesGlance()];
     }
 
+    // The background wrote Storage itself; just redraw.
     function onBackgroundData(data as Application.PersistableType) as Void {
-        if (data instanceof Dictionary) {
-            var d = data as Dictionary;
-            Application.Storage.setValue("status", d["status"]);
-            if (d["sentTs"] != null) {
-                Application.Storage.setValue("sentTs", d["sentTs"]);
-                Application.Storage.setValue("level", d["level"]);
-            }
-        }
         WatchUi.requestUpdate();
     }
 
     (:typecheck(disableGlanceCheck))
     function getServiceDelegate() as [ServiceDelegate] {
-        return [new UesBbDelegate()];
+        return [new UesBg()];
     }
 }

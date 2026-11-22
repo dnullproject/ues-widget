@@ -98,7 +98,7 @@ jobs:
       - uses: actions/upload-artifact@v4
         if: steps.dev.outputs.have == 'true'
         with:
-          name: ues-bb-watch
+          name: ues-watch
           path: watch/bin/*.prg
       - name: Attach to release
         if: steps.dev.outputs.have == 'true' && startsWith(github.ref, 'refs/tags/v')
