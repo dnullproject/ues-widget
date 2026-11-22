@@ -60,13 +60,18 @@ class NoteSender {
             return false;
         }
         var c = m["c"] as Number;
+        var wrote = false;
         try {
             Application.Storage.setValue("c" + id + "." + c, b64);
+            wrote = true;
             m["c"] = c + 1;
             m["b"] = ((m["b"] as Number) < 0) ? -1 : (m["b"] as Number) + rawBytes;
             Application.Storage.setValue("m" + id, m);
         } catch (e) {
-            Application.Storage.deleteValue("c" + id + "." + c);
+            // a chunk that did reach Storage stays: recover() counts it later; only a failed partial write is cleared
+            if (!wrote) {
+                Application.Storage.deleteValue("c" + id + "." + c);
+            }
             return false;
         }
         return true;
