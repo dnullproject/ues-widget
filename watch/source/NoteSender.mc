@@ -6,8 +6,11 @@ import Toybox.Time;
 
 // Persistent upload queue shared by the foreground recorder and the background retry.
 // Storage layout: "pend" = [note_id...] (oldest first), "m<id>" = meta dict, "c<id>.<seq>" = base64 chunk string.
-// Meta: c = chunks stored, b = raw audio bytes stored, n = next seq to send, done = recording finished, fmt, rec, dur, x = 409 resends.
-// Chunks stay until the server answers 201, so a 409 {"missing":[..]} can be answered by resending.
+// "held" = [note_id...]: notes the server rejected or that lost their meta/chunk. They keep all their audio and are
+// not sent until the owner retries (Queue page START); they never block "pend".
+// Meta: c = chunks stored, b = raw audio bytes stored (-1 = unknown after chunk recovery), n = next seq to send,
+// done = recording finished, fmt, rec, dur, x = 409 resends.
+// Audio is deleted ONLY by erase(): after a 201, by the owner's delete menu, or for a note with zero chunks.
 (:background)
 class NoteSender {
     var lastCode as Number = 0; // HTTP status (or negative Connect IQ error) of the last reply, shown on failure
@@ -25,6 +28,11 @@ class NoteSender {
     function ids() as Array<String> {
         var p = Application.Storage.getValue("pend");
         return (p == null) ? [] as Array<String> : p as Array<String>;
+    }
+
+    function held() as Array<String> {
+        var h = Application.Storage.getValue("held");
+        return (h == null) ? [] as Array<String> : h as Array<String>;
     }
 
     function meta(id as String) as Dictionary? {
@@ -55,7 +63,7 @@ class NoteSender {
         try {
             Application.Storage.setValue("c" + id + "." + c, b64);
             m["c"] = c + 1;
-            m["b"] = (m["b"] as Number) + rawBytes;
+            m["b"] = ((m["b"] as Number) < 0) ? -1 : (m["b"] as Number) + rawBytes;
             Application.Storage.setValue("m" + id, m);
         } catch (e) {
             Application.Storage.deleteValue("c" + id + "." + c);
@@ -73,30 +81,95 @@ class NoteSender {
         }
     }
 
-    // why is shown small on screen ("lastDrop"), so a lost note can be explained; "" for a delivered one
-    function drop(id as String, why as String) as Void {
-        if (!why.equals("")) {
-            Application.Storage.setValue("lastDrop", why + " " + id.substring(id.length() - 5, id.length()));
-        }
+    // The only place audio is deleted; callers: 201, the owner's delete menu, removeEmpty (zero chunks).
+    function erase(id as String) as Void {
         var m = meta(id);
         var c = (m == null) ? 0 : m["c"] as Number;
-        for (var i = 0; i < c; i++) {
+        var i = 0;
+        while (i < c || Application.Storage.getValue("c" + id + "." + i) != null) { // also uncounted chunks
             Application.Storage.deleteValue("c" + id + "." + i);
+            i++;
         }
         Application.Storage.deleteValue("m" + id);
         var p = ids();
         p.remove(id);
         Application.Storage.setValue("pend", p);
+        var h = held();
+        h.remove(id);
+        Application.Storage.setValue("held", h);
+    }
+
+    // Take a note out of the send queue without touching its audio; shown on the Queue page ("lastDrop").
+    function park(id as String, why as String) as Void {
+        var h = held();
+        if (h.indexOf(id) < 0) {
+            h.add(id);
+        }
+        Application.Storage.setValue("held", h); // first: a crash leaves the id in both lists, never in none
+        var p = ids();
+        p.remove(id);
+        Application.Storage.setValue("pend", p);
+        Application.Storage.setValue("lastDrop", "held: " + why + " " + id.substring(id.length() - 5, id.length()));
+    }
+
+    // Queue page START: held notes go to the end of the queue and restart from seq 0 (a 409 size mismatch makes
+    // the server discard its chunks, so everything is resent).
+    function unhold() as Void {
+        var h = held();
+        var p = ids();
+        for (var i = 0; i < h.size(); i++) {
+            var m = meta(h[i]);
+            if (m != null) {
+                m["x"] = 0;
+                m["n"] = 0;
+                Application.Storage.setValue("m" + h[i], m);
+            }
+            if (p.indexOf(h[i]) < 0) {
+                p.add(h[i]);
+            }
+        }
+        Application.Storage.setValue("pend", p); // first: a crash leaves the id in both lists, never in none
+        Application.Storage.setValue("held", [] as Array<String>);
+    }
+
+    // addChunk writes the chunk and then the meta; a crash between them leaves the chunk uncounted.
+    // Count such chunks now (their size is unknown: b = -1). Returns the stored chunk count.
+    function recover(id as String) as Number {
+        var m = meta(id);
+        var c = (m == null) ? 0 : m["c"] as Number;
+        var found = false;
+        while (Application.Storage.getValue("c" + id + "." + c) != null) {
+            c++;
+            found = true;
+        }
+        if (found && m != null) {
+            m["c"] = c;
+            m["b"] = -1;
+            Application.Storage.setValue("m" + id, m);
+        }
+        return c;
+    }
+
+    // Remove a note that holds no audio. false (and nothing removed) when it has any chunk.
+    function removeEmpty(id as String) as Boolean {
+        if (recover(id) > 0) {
+            return false;
+        }
+        erase(id); // zero chunks: nothing to lose
+        return true;
     }
 
     // Recording interrupted before finish() (crash, or the app left while stopping): send the audio
-    // already stored instead of losing it; only a note without any chunk is dropped.
-    function dropUnfinished() as Void {
+    // already stored instead of losing it; only a note without any chunk is removed.
+    function sealUnfinished() as Void {
         var p = ids();
         for (var i = 0; i < p.size(); i++) {
+            if (removeEmpty(p[i])) {
+                continue;
+            }
             var m = meta(p[i]);
-            if (m == null || (m["c"] as Number) == 0) {
-                drop(p[i], "empty");
+            if (m == null) {
+                park(p[i], "no meta");
             } else if (!(m["done"] as Boolean)) {
                 m["done"] = true;
                 Application.Storage.setValue("m" + p[i], m);
@@ -118,7 +191,7 @@ class NoteSender {
         var id = p[0];
         var m = meta(id);
         if (m == null) {
-            drop(id, "no meta");
+            park(id, "no meta");
             pump();
             return;
         }
@@ -137,7 +210,7 @@ class NoteSender {
         }
         var data = Application.Storage.getValue("c" + id + "." + n) as String?;
         if (data == null) {
-            drop(id, "chunk lost"); // chunk lost from Storage: the note can never complete
+            park(id, "chunk lost"); // the note cannot complete, but its other chunks are kept
             pump();
             return;
         }
@@ -149,7 +222,9 @@ class NoteSender {
         }
         if (last) {
             body["duration_s"] = m["dur"];
-            body["total_bytes"] = m["b"]; // the server answers 201 only if the assembled audio has this length
+            if ((m["b"] as Number) >= 0) {
+                body["total_bytes"] = m["b"]; // the server answers 201 only if the assembled audio has this length
+            }
             body["chunks"] = c;
         }
         var url = Application.Properties.getValue("baseUrl") as String;
@@ -190,7 +265,7 @@ class NoteSender {
         // judge the reply by what was sent: recording may have stopped while a mid-note chunk was in flight
         var last = _sentLast;
         if (code == 201) {
-            drop(_id, ""); // only an explicit 201 confirms delivery
+            erase(_id); // allowed: 201 means the server committed the audio
         } else if (code >= 200 && code < 300 && !last) {
             m["n"] = n + 1;
             Application.Storage.setValue("m" + _id, m);
@@ -199,7 +274,7 @@ class NoteSender {
             m["n"] = firstMissing(data, n);
             Application.Storage.setValue("m" + _id, m);
         } else if (code == 400 || code == 409) {
-            drop(_id, "rejected " + code); // the server will never accept this note: do not block the queue
+            park(_id, "rejected " + code); // keep the audio; the owner's retry resends it
         } else {
             failed = true; // 401, 5xx, no phone / connection (negative codes): keep and retry later
             _onIdle.invoke();

@@ -146,6 +146,11 @@ class UesBg extends System.ServiceDelegate {
     }
 
     private function notes() as Void {
+        var fg = Application.Storage.getValue("fgAt");
+        if (fg instanceof Number && Time.now().value() - (fg as Number) < 30) {
+            Background.exit(null); // the open app pumps itself; two writers of "pend" would lose updates
+            return;
+        }
         _sender = new NoteSender(method(:onIdle));
         (_sender as NoteSender).pump(); // calls onIdle at once when the queue is empty
     }
